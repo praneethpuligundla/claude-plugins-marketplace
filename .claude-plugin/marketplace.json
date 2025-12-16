@@ -1,16 +1,17 @@
 {
   "name": "praneeth-plugins",
+  "owner": "praneethpuligundla",
   "version": "1.0.0",
   "description": "Collection of Claude Code plugins by Praneeth Puligundla",
   "plugins": [
     {
       "name": "harness",
-      "path": "plugins/harness",
+      "source": "plugins/harness",
       "description": "Lightweight agent harness with progress tracking, feature checklists, and git checkpoints"
     },
     {
       "name": "ultraharness",
-      "path": "plugins/ultraharness",
+      "source": "plugins/ultraharness",
       "description": "Advanced harness with FIC (Flow-Information-Context) system for intelligent context management"
     }
   ]
