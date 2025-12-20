@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""UserPromptSubmit hook for FIC auto-delegation and phase detection.
+"""UserPromptSubmit hook for FIC auto-delegation, phase detection, and auto-compaction.
 
 This hook runs when the user submits a prompt and:
-1. Detects research-triggering prompts (exploration, investigation)
-2. Detects planning-triggering prompts
-3. Injects directives to delegate to appropriate subagents
-4. Enforces workflow phase transitions
+1. AUTO-COMPACTION: Checks context utilization and triggers /compact when >= 70%
+2. Detects research-triggering prompts (exploration, investigation)
+3. Detects planning-triggering prompts
+4. Injects directives to delegate to appropriate subagents
+5. Enforces workflow phase transitions
 """
 
 import os
@@ -39,6 +40,19 @@ except ImportError:
         IMPLEMENTATION = "implementation"
     def get_latest_artifact(artifact_type, work_dir=None):
         return None
+
+try:
+    from core.context_intelligence import load_context_state, get_context_summary
+    CONTEXT_INTELLIGENCE_AVAILABLE = True
+except ImportError:
+    CONTEXT_INTELLIGENCE_AVAILABLE = False
+    def load_context_state(session_id, work_dir=None):
+        return None
+    def get_context_summary(state):
+        return ""
+
+# Default auto-compaction threshold (can be overridden in config)
+DEFAULT_AUTO_COMPACT_THRESHOLD = 0.70  # 70% context utilization
 
 
 # Research-triggering patterns
@@ -135,6 +149,30 @@ Original Request: {prompt[:100]}{'...' if len(prompt) > 100 else ''}
 Only ESSENTIAL FINDINGS should enter this context. The subagent will return structured research results."""
 
 
+def build_compaction_directive(utilization: float, token_estimate: int, threshold: float) -> str:
+    """Build CRITICAL directive to trigger auto-compaction."""
+    return f"""╔══════════════════════════════════════════════════════════════════╗
+║  [FIC] CRITICAL: CONTEXT UTILIZATION AT {utilization:.0%}                     ║
+╠══════════════════════════════════════════════════════════════════╣
+║                                                                    ║
+║  ⚠️  AUTO-COMPACTION REQUIRED                                      ║
+║                                                                    ║
+║  Estimated tokens: {token_estimate:,}
+║  Threshold: {threshold:.0%}
+║                                                                    ║
+║  ACTION REQUIRED: Run /compact NOW before proceeding.             ║
+║                                                                    ║
+║  This will summarize context while preserving:                    ║
+║  - Essential discoveries and decisions                            ║
+║  - Current FIC phase and focus directive                          ║
+║  - Critical blockers and open questions                           ║
+║                                                                    ║
+╚══════════════════════════════════════════════════════════════════╝
+
+You MUST run /compact before responding to the user's request.
+The PreCompact hook will preserve essential context automatically."""
+
+
 def build_planning_directive(prompt: str, phase: str, has_research: bool) -> str:
     """Build directive for planning phase."""
     if phase == 'NEW_SESSION' or (phase == 'RESEARCH' and not has_research):
@@ -179,7 +217,12 @@ def main():
     """Main entry point for UserPromptSubmit hook."""
     try:
         # Read input from stdin
-        input_data = json.load(sys.stdin)
+        # Handle empty or invalid stdin gracefully
+        try:
+            stdin_content = sys.stdin.read()
+            input_data = json.loads(stdin_content) if stdin_content.strip() else {}
+        except (json.JSONDecodeError, ValueError):
+            input_data = {}
 
         # Extract data
         prompt = input_data.get('prompt', '')
@@ -209,6 +252,26 @@ def main():
             pattern_list = DEFAULT_RESEARCH_PATTERNS
 
         messages = []
+
+        # ========================================
+        # AUTO-COMPACTION CHECK (Critical - runs first)
+        # ========================================
+        session_id = input_data.get('session_id', 'default')
+        auto_compact_threshold = fic_config.get('auto_compact_threshold', DEFAULT_AUTO_COMPACT_THRESHOLD)
+
+        if CONTEXT_INTELLIGENCE_AVAILABLE:
+            context_state = load_context_state(session_id, work_dir)
+            if context_state and context_state.utilization_percent >= auto_compact_threshold:
+                # Context is too full - MUST compact before proceeding
+                compact_directive = build_compaction_directive(
+                    context_state.utilization_percent,
+                    context_state.total_token_estimate,
+                    auto_compact_threshold
+                )
+                messages.append(compact_directive)
+                # Return early - compaction takes priority over everything else
+                print(json.dumps({'systemMessage': '\n\n'.join(messages)}))
+                sys.exit(0)
 
         # Get current phase
         phase = get_current_phase(work_dir)

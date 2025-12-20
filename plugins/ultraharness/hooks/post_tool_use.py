@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""PostToolUse hook for FIC context intelligence and progress tracking.
+"""PostToolUse hook for FIC context intelligence, auto-compaction, and progress tracking.
 
 This hook runs after Edit, Write, Bash, Read, Grep, Glob, and Task tools to:
 1. Track what INFORMATION enters context (not just tool calls)
 2. Classify information as essential/helpful/noise
 3. Detect redundant discoveries
 4. Estimate context utilization
-5. Suggest compaction when utilization is high
+5. TRIGGER AUTO-COMPACTION when utilization >= 70% (critical for long-running sessions)
 6. Auto-log significant changes
 7. Suggest checkpoints after major changes
 """
@@ -27,6 +27,7 @@ try:
     from core.change_detector import classify_change, should_auto_log, should_suggest_checkpoint, ChangeLevel
     from core.progress import append_progress
     from core.features import load_features, get_next_features
+    from core.validation import validate_session_id, validate_work_dir
 except ImportError:
     # Fallback if imports fail
     def load_config(work_dir=None):
@@ -53,6 +54,10 @@ except ImportError:
         return {"features": []}
     def get_next_features(count=5, work_dir=None):
         return []
+    def validate_session_id(session_id):
+        return bool(session_id and len(session_id) <= 128), None
+    def validate_work_dir(work_dir):
+        return bool(work_dir and os.path.isdir(work_dir)), None
 
 # FIC Context Intelligence imports
 try:
@@ -73,25 +78,62 @@ except ImportError:
         return ""
 
 
+# Default auto-compaction threshold
+DEFAULT_AUTO_COMPACT_THRESHOLD = 0.70
+
+
+def build_compaction_directive(utilization: float, token_estimate: int, threshold: float) -> str:
+    """Build CRITICAL directive to trigger auto-compaction during long-running sessions."""
+    return f"""
+╔══════════════════════════════════════════════════════════════════╗
+║  [FIC] CRITICAL: CONTEXT UTILIZATION AT {utilization:.0%}                     ║
+║  LONG-RUNNING SESSION - AUTO-COMPACTION REQUIRED                  ║
+╠══════════════════════════════════════════════════════════════════╣
+║                                                                    ║
+║  Estimated tokens: {token_estimate:,}
+║  Threshold: {threshold:.0%}
+║                                                                    ║
+║  ACTION REQUIRED: Run /compact NOW before continuing.             ║
+║                                                                    ║
+║  Context is filling up during autonomous operation.               ║
+║  Compacting now preserves essential discoveries and prevents      ║
+║  context overflow.                                                 ║
+║                                                                    ║
+╚══════════════════════════════════════════════════════════════════╝
+
+STOP current work. Run /compact immediately.
+The PreCompact hook will preserve essential context automatically."""
+
+
 # State file for tracking cumulative changes within a session
-STATE_FILE_TEMPLATE = "/tmp/harness-session-{session_id}.json"
+# Using .claude/ directory for security (not world-readable) and persistence across reboots
+STATE_FILE_NAME = "harness-session-state.json"
 
 
-def get_state_file(session_id: str) -> Path:
-    """Get path to session state file."""
-    return Path(STATE_FILE_TEMPLATE.format(session_id=session_id or 'default'))
+def get_state_file(session_id: str, work_dir: str = None) -> Path:
+    """Get path to session state file in .claude/ directory for security and persistence."""
+    if work_dir is None:
+        work_dir = os.environ.get('CLAUDE_WORKING_DIRECTORY', os.getcwd())
+    state_dir = Path(work_dir) / '.claude'
+    state_dir.mkdir(parents=True, exist_ok=True)
+    return state_dir / STATE_FILE_NAME
 
 
-def load_session_state(session_id: str) -> dict:
+def load_session_state(session_id: str, work_dir: str = None) -> dict:
     """Load session state for tracking cumulative changes."""
-    state_file = get_state_file(session_id)
+    state_file = get_state_file(session_id, work_dir)
     if state_file.exists():
         try:
             with open(state_file, 'r') as f:
-                return json.load(f)
-        except Exception:
+                data = json.load(f)
+                # Validate session_id matches
+                if data.get('session_id') == session_id:
+                    return data
+        except (json.JSONDecodeError, IOError) as e:
+            # Log error but don't fail
             pass
     return {
+        "session_id": session_id,
         "changes_since_checkpoint": 0,
         "last_checkpoint_time": None,
         "significant_changes": [],
@@ -99,14 +141,22 @@ def load_session_state(session_id: str) -> dict:
     }
 
 
-def save_session_state(session_id: str, state: dict):
-    """Save session state."""
-    state_file = get_state_file(session_id)
+def save_session_state(session_id: str, state: dict, work_dir: str = None):
+    """Save session state securely to .claude/ directory."""
+    state_file = get_state_file(session_id, work_dir)
     try:
+        # Ensure session_id is in state
+        state['session_id'] = session_id
+        state['last_saved'] = datetime.now().isoformat()
         with open(state_file, 'w') as f:
-            json.dump(state, f)
-    except Exception:
-        pass
+            json.dump(state, f, indent=2)
+        # Set restrictive permissions on Unix systems
+        try:
+            os.chmod(state_file, 0o600)
+        except (OSError, AttributeError):
+            pass  # Windows or permission issues
+    except (IOError, OSError):
+        pass  # Non-blocking - don't fail if can't save
 
 
 def should_suggest_checkpoint_by_time(state: dict, config: dict) -> bool:
@@ -170,7 +220,12 @@ def main():
     """Main entry point for PostToolUse hook."""
     try:
         # Read input from stdin
-        input_data = json.load(sys.stdin)
+        # Handle empty or invalid stdin gracefully
+        try:
+            stdin_content = sys.stdin.read()
+            input_data = json.loads(stdin_content) if stdin_content.strip() else {}
+        except (json.JSONDecodeError, ValueError):
+            input_data = {}
 
         # Extract data
         session_id = input_data.get('session_id', 'default')
@@ -178,6 +233,19 @@ def main():
         tool_input = input_data.get('tool_input', {})
         tool_result = input_data.get('tool_result', '')
         work_dir = os.environ.get('CLAUDE_WORKING_DIRECTORY', os.getcwd())
+
+        # Validate session_id to prevent path traversal attacks
+        is_valid_session, session_error = validate_session_id(session_id)
+        if not is_valid_session:
+            # Use a safe default session ID
+            session_id = 'default'
+
+        # Validate work_dir
+        is_valid_work_dir, work_dir_error = validate_work_dir(work_dir)
+        if not is_valid_work_dir:
+            # Cannot proceed with invalid work_dir
+            print(json.dumps({}))
+            sys.exit(0)
 
         # Check if harness is initialized
         if not is_harness_initialized(work_dir):
@@ -211,12 +279,26 @@ def main():
                 if warning:
                     messages.append(f"[FIC] {warning}")
 
-                # Check compaction threshold
+                # Check for AUTO-COMPACTION (critical threshold)
                 fic_config = config.get('fic_config', {})
+                auto_compact_threshold = fic_config.get('auto_compact_threshold', DEFAULT_AUTO_COMPACT_THRESHOLD)
+
+                if context_state.utilization_percent >= auto_compact_threshold:
+                    # CRITICAL: Context is too full - must compact NOW
+                    compact_directive = build_compaction_directive(
+                        context_state.utilization_percent,
+                        context_state.total_token_estimate,
+                        auto_compact_threshold
+                    )
+                    # Return immediately with compaction directive
+                    print(json.dumps({'systemMessage': compact_directive}))
+                    sys.exit(0)
+
+                # Check soft compaction threshold (suggestion only)
                 compaction_threshold = fic_config.get('compaction_tool_threshold', 25)
+                util_high = fic_config.get('target_utilization_high', 0.60)
 
                 if len(context_state.entries) >= compaction_threshold:
-                    util_high = fic_config.get('target_utilization_high', 0.60)
                     if context_state.utilization_percent >= util_high:
                         messages.append(f"[FIC] Context utilization at {context_state.utilization_percent:.0%}. Consider compacting or using subagents for research.")
 
@@ -247,8 +329,8 @@ def main():
         # Classify the change
         level, reason = classify_change(tool_name, tool_input, tool_result)
 
-        # Load and update session state
-        state = load_session_state(session_id)
+        # Load and update session state (using .claude/ for security)
+        state = load_session_state(session_id, work_dir)
 
         # Auto-log significant changes
         if config.get('auto_progress_logging', True) and should_auto_log(level):
@@ -303,8 +385,8 @@ def main():
                 elif tests_failed:
                     messages.append("[FIC] Tests failed. Review failures before continuing.")
 
-        # Save updated state
-        save_session_state(session_id, state)
+        # Save updated state (using .claude/ for security)
+        save_session_state(session_id, state, work_dir)
 
         # Output result
         result = {}

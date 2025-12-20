@@ -265,7 +265,12 @@ def main():
     """Main entry point for Stop hook."""
     try:
         # Read input from stdin
-        input_data = json.load(sys.stdin)
+        # Handle empty or invalid stdin gracefully
+        try:
+            stdin_content = sys.stdin.read()
+            input_data = json.loads(stdin_content) if stdin_content.strip() else {}
+        except (json.JSONDecodeError, ValueError):
+            input_data = {}
         work_dir = get_working_directory()
 
         # Build stop message

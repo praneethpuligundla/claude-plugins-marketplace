@@ -2,33 +2,71 @@
 """Progress tracking module for harness.
 
 Provides utilities for reading and writing to claude-progress.txt
+
+Security:
+- Validates work_dir to prevent path traversal attacks
+- Uses safe path joining for file operations
 """
 
 import os
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
+
+try:
+    from core.validation import validate_work_dir, safe_join
+except ImportError:
+    # Fallback validation if module not available
+    def validate_work_dir(work_dir):
+        if work_dir and os.path.isdir(work_dir):
+            return True, None
+        return False, "Invalid directory"
+    def safe_join(base, *paths):
+        return Path(base).joinpath(*paths)
 
 PROGRESS_FILE = "claude-progress.txt"
 
 
-def get_progress_path(work_dir=None):
-    """Get path to progress file."""
+def get_progress_path(work_dir: Optional[str] = None) -> Optional[Path]:
+    """Get path to progress file.
+
+    Args:
+        work_dir: Working directory (uses cwd if None)
+
+    Returns:
+        Path to progress file, or None if work_dir is invalid
+    """
     if work_dir is None:
         work_dir = os.getcwd()
-    return Path(work_dir) / PROGRESS_FILE
+
+    # Validate working directory
+    is_valid, error = validate_work_dir(work_dir)
+    if not is_valid:
+        return None
+
+    # Use safe path joining
+    return safe_join(work_dir, PROGRESS_FILE)
 
 
-def read_progress(work_dir=None):
+def read_progress(work_dir=None) -> str:
     """Read the entire progress file."""
     path = get_progress_path(work_dir)
+    if path is None:
+        return ""
     if path.exists():
         return path.read_text()
     return ""
 
 
-def append_progress(message, work_dir=None, include_timestamp=True):
-    """Append a message to the progress file."""
+def append_progress(message: str, work_dir=None, include_timestamp: bool = True) -> Optional[str]:
+    """Append a message to the progress file.
+
+    Returns:
+        The entry written, or None if path validation failed
+    """
     path = get_progress_path(work_dir)
+    if path is None:
+        return None
 
     if include_timestamp:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -77,9 +115,15 @@ def log_blocker(blocker, work_dir=None):
     append_progress(f"BLOCKER: {blocker}", work_dir)
 
 
-def initialize_progress_file(project_name=None, work_dir=None):
-    """Initialize a new progress file."""
+def initialize_progress_file(project_name=None, work_dir=None) -> bool:
+    """Initialize a new progress file.
+
+    Returns:
+        True if file was created, False if already exists or validation failed
+    """
     path = get_progress_path(work_dir)
+    if path is None:
+        return False  # Validation failed
 
     if path.exists():
         return False  # Already exists

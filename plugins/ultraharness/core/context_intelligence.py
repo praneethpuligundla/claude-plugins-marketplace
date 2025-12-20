@@ -50,7 +50,15 @@ class ContextState:
 
 
 # Token estimation constants
-TOKENS_PER_CHAR = 0.25  # Rough approximation
+# Different content types have different token ratios due to tokenization patterns
+TOKEN_RATIOS = {
+    'json': 0.35,       # JSON has more special chars, less efficient
+    'code': 0.28,       # Code has variable names, operators - moderate
+    'markdown': 0.22,   # Markdown with prose is more efficient
+    'text': 0.25,       # Plain text baseline
+    'error': 0.30,      # Error messages often have paths, technical terms
+}
+DEFAULT_TOKENS_PER_CHAR = 0.25  # Fallback ratio
 MAX_CONTEXT_TOKENS = 170000  # Approximate max context
 TARGET_UTILIZATION_LOW = 0.40
 TARGET_UTILIZATION_HIGH = 0.60
@@ -121,9 +129,50 @@ def save_context_state(state: ContextState, work_dir: str = None) -> bool:
         return False
 
 
-def estimate_tokens(content: str) -> int:
-    """Estimate token count from content."""
-    return int(len(content) * TOKENS_PER_CHAR)
+def detect_content_type(content: str) -> str:
+    """Detect content type for more accurate token estimation.
+
+    Returns one of: 'json', 'code', 'markdown', 'error', 'text'
+    """
+    content_sample = content[:1000]  # Sample first 1000 chars for efficiency
+
+    # Check for JSON patterns
+    if content_sample.strip().startswith(('{', '[')):
+        return 'json'
+
+    # Check for error/stack trace patterns
+    error_indicators = ['error', 'exception', 'traceback', 'stack trace', 'at line']
+    if any(ind in content_sample.lower() for ind in error_indicators):
+        return 'error'
+
+    # Check for code patterns (high density of special characters)
+    code_chars = sum(1 for c in content_sample if c in '(){}[];=<>:')
+    if code_chars > len(content_sample) * 0.05:  # >5% special chars
+        return 'code'
+
+    # Check for markdown patterns
+    markdown_indicators = ['#', '```', '**', '__', '- ', '* ']
+    if any(ind in content_sample for ind in markdown_indicators):
+        return 'markdown'
+
+    return 'text'
+
+
+def estimate_tokens(content: str, content_type: str = None) -> int:
+    """Estimate token count from content with content-type awareness.
+
+    Different content types have different tokenization efficiency:
+    - JSON: ~0.35 tokens/char (special characters less efficient)
+    - Code: ~0.28 tokens/char (variable names, operators)
+    - Markdown: ~0.22 tokens/char (prose is more efficient)
+    - Text: ~0.25 tokens/char (baseline)
+    - Error: ~0.30 tokens/char (paths, technical terms)
+    """
+    if content_type is None:
+        content_type = detect_content_type(content)
+
+    ratio = TOKEN_RATIOS.get(content_type, DEFAULT_TOKENS_PER_CHAR)
+    return int(len(content) * ratio)
 
 
 def hash_content(content: str) -> str:

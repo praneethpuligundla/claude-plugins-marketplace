@@ -519,7 +519,12 @@ def main():
     """Main entry point for SessionStart hook."""
     try:
         # Read input from stdin (contains session info)
-        input_data = json.load(sys.stdin)
+        # Handle empty or invalid stdin gracefully
+        try:
+            stdin_content = sys.stdin.read()
+            input_data = json.loads(stdin_content) if stdin_content.strip() else {}
+        except (json.JSONDecodeError, ValueError):
+            input_data = {}
 
         # Get working directory
         work_dir = get_working_directory()

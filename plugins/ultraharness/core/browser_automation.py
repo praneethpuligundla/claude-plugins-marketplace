@@ -118,6 +118,19 @@ def take_screenshot(
         return _puppeteer_screenshot(url, output_path, work_dir, selector, wait_for, timeout, full_page)
 
 
+def _escape_for_js(value: str) -> str:
+    """Safely escape a string for use in JavaScript using JSON encoding.
+
+    This is safer than manual escaping as JSON.dumps handles all edge cases:
+    - Single/double quotes
+    - Backslashes
+    - Newlines and control characters
+    - Unicode characters
+    """
+    # json.dumps returns a quoted string, we use it directly in JS
+    return json.dumps(value)
+
+
 def _playwright_screenshot(
     url: str,
     output_path: str,
@@ -128,19 +141,25 @@ def _playwright_screenshot(
     full_page: bool
 ) -> BrowserResult:
     """Take screenshot using Playwright."""
-    # Escape strings for JavaScript
-    url_escaped = url.replace("'", "\\'")
-    output_escaped = output_path.replace("'", "\\'")
+    # Use JSON encoding for safe JavaScript string escaping
+    url_js = _escape_for_js(url)
+    output_js = _escape_for_js(output_path)
 
     wait_selector_code = ""
     if selector:
-        selector_escaped = selector.replace("'", "\\'")
-        wait_selector_code = f"await page.waitForSelector('{selector_escaped}', {{ timeout: {timeout} }});"
+        selector_js = _escape_for_js(selector)
+        wait_selector_code = f"await page.waitForSelector({selector_js}, {{ timeout: {timeout} }});"
 
     wait_function_code = ""
     if wait_for:
-        wait_for_escaped = wait_for.replace("'", "\\'")
-        wait_function_code = f"await page.waitForFunction(() => {wait_for_escaped}, {{ timeout: {timeout} }});"
+        # For wait_for, we need the raw expression, but we should validate it
+        # Only allow simple expressions (no semicolons, function calls, etc.)
+        if ';' in wait_for or 'function' in wait_for.lower():
+            return BrowserResult(
+                success=False,
+                error="wait_for expression contains potentially unsafe content"
+            )
+        wait_function_code = f"await page.waitForFunction(() => {wait_for}, {{ timeout: {timeout} }});"
 
     script = f"""
 const {{ chromium }} = require('playwright');
@@ -150,11 +169,11 @@ const {{ chromium }} = require('playwright');
     const page = await browser.newPage();
 
     try {{
-        await page.goto('{url_escaped}', {{ timeout: {timeout}, waitUntil: 'networkidle' }});
+        await page.goto({url_js}, {{ timeout: {timeout}, waitUntil: 'networkidle' }});
         {wait_selector_code}
         {wait_function_code}
-        await page.screenshot({{ path: '{output_escaped}', fullPage: {'true' if full_page else 'false'} }});
-        console.log(JSON.stringify({{ success: true, path: '{output_escaped}' }}));
+        await page.screenshot({{ path: {output_js}, fullPage: {'true' if full_page else 'false'} }});
+        console.log(JSON.stringify({{ success: true, path: {output_js} }}));
     }} catch (e) {{
         console.log(JSON.stringify({{ success: false, error: e.message }}));
     }} finally {{
@@ -205,18 +224,24 @@ def _puppeteer_screenshot(
     full_page: bool
 ) -> BrowserResult:
     """Take screenshot using Puppeteer."""
-    url_escaped = url.replace("'", "\\'")
-    output_escaped = output_path.replace("'", "\\'")
+    # Use JSON encoding for safe JavaScript string escaping
+    url_js = _escape_for_js(url)
+    output_js = _escape_for_js(output_path)
 
     wait_selector_code = ""
     if selector:
-        selector_escaped = selector.replace("'", "\\'")
-        wait_selector_code = f"await page.waitForSelector('{selector_escaped}', {{ timeout: {timeout} }});"
+        selector_js = _escape_for_js(selector)
+        wait_selector_code = f"await page.waitForSelector({selector_js}, {{ timeout: {timeout} }});"
 
     wait_function_code = ""
     if wait_for:
-        wait_for_escaped = wait_for.replace("'", "\\'")
-        wait_function_code = f"await page.waitForFunction(() => {wait_for_escaped}, {{ timeout: {timeout} }});"
+        # Validate wait_for expression
+        if ';' in wait_for or 'function' in wait_for.lower():
+            return BrowserResult(
+                success=False,
+                error="wait_for expression contains potentially unsafe content"
+            )
+        wait_function_code = f"await page.waitForFunction(() => {wait_for}, {{ timeout: {timeout} }});"
 
     script = f"""
 const puppeteer = require('puppeteer');
@@ -226,11 +251,11 @@ const puppeteer = require('puppeteer');
     const page = await browser.newPage();
 
     try {{
-        await page.goto('{url_escaped}', {{ timeout: {timeout}, waitUntil: 'networkidle0' }});
+        await page.goto({url_js}, {{ timeout: {timeout}, waitUntil: 'networkidle0' }});
         {wait_selector_code}
         {wait_function_code}
-        await page.screenshot({{ path: '{output_escaped}', fullPage: {'true' if full_page else 'false'} }});
-        console.log(JSON.stringify({{ success: true, path: '{output_escaped}' }}));
+        await page.screenshot({{ path: {output_js}, fullPage: {'true' if full_page else 'false'} }});
+        console.log(JSON.stringify({{ success: true, path: {output_js} }}));
     }} catch (e) {{
         console.log(JSON.stringify({{ success: false, error: e.message }}));
     }} finally {{
@@ -299,15 +324,16 @@ def verify_element(
             error="No browser automation tool found"
         )
 
-    url_escaped = url.replace("'", "\\'")
-    selector_escaped = selector.replace("'", "\\'")
+    # Use JSON encoding for safe JavaScript string escaping
+    url_js = _escape_for_js(url)
+    selector_js = _escape_for_js(selector)
 
     text_check = ""
     if expected_text:
-        expected_escaped = expected_text.replace("'", "\\'")
+        expected_js = _escape_for_js(expected_text)
         text_check = f"""
-            if (!text.includes('{expected_escaped}')) {{
-                throw new Error('Text mismatch: expected "{expected_escaped}" but found: ' + text.substring(0, 100));
+            if (!text.includes({expected_js})) {{
+                throw new Error('Text mismatch: expected ' + {expected_js} + ' but found: ' + text.substring(0, 100));
             }}
 """
 
@@ -320,8 +346,8 @@ const {{ chromium }} = require('playwright');
     const page = await browser.newPage();
 
     try {{
-        await page.goto('{url_escaped}', {{ timeout: {timeout}, waitUntil: 'networkidle' }});
-        const element = await page.waitForSelector('{selector_escaped}', {{ timeout: {timeout} }});
+        await page.goto({url_js}, {{ timeout: {timeout}, waitUntil: 'networkidle' }});
+        const element = await page.waitForSelector({selector_js}, {{ timeout: {timeout} }});
 
         if (element) {{
             const text = await element.textContent() || '';
@@ -346,9 +372,9 @@ const puppeteer = require('puppeteer');
     const page = await browser.newPage();
 
     try {{
-        await page.goto('{url_escaped}', {{ timeout: {timeout}, waitUntil: 'networkidle0' }});
-        await page.waitForSelector('{selector_escaped}', {{ timeout: {timeout} }});
-        const element = await page.$('{selector_escaped}');
+        await page.goto({url_js}, {{ timeout: {timeout}, waitUntil: 'networkidle0' }});
+        await page.waitForSelector({selector_js}, {{ timeout: {timeout} }});
+        const element = await page.$({selector_js});
 
         if (element) {{
             const text = await page.evaluate(el => el.textContent || '', element);

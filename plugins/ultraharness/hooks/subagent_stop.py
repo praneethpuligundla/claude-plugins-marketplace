@@ -249,7 +249,12 @@ def main():
     """Main entry point for SubagentStop hook."""
     try:
         # Read input from stdin
-        input_data = json.load(sys.stdin)
+        # Handle empty or invalid stdin gracefully
+        try:
+            stdin_content = sys.stdin.read()
+            input_data = json.loads(stdin_content) if stdin_content.strip() else {}
+        except (json.JSONDecodeError, ValueError):
+            input_data = {}
 
         subagent_type = input_data.get('subagent_type', '')
         description = input_data.get('description', '')

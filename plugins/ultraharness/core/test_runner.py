@@ -7,6 +7,7 @@ to help with feature status automation.
 
 import os
 import subprocess
+import shlex
 import re
 from typing import Dict, Optional, List
 from pathlib import Path
@@ -94,14 +95,39 @@ def run_tests(work_dir: str, timeout: int = 300, config: Dict = None) -> TestSum
         )
 
     try:
-        result = subprocess.run(
-            command,
-            shell=True,
-            cwd=work_dir,
-            capture_output=True,
-            text=True,
-            timeout=timeout
-        )
+        # Use shlex.split for safe command parsing instead of shell=True
+        # This prevents command injection attacks
+        # For complex commands with pipes/redirects, we still need shell
+        # but we validate the command first
+        needs_shell = any(c in command for c in ['|', '&&', '||', ';', '>', '<', '2>&1'])
+
+        if needs_shell:
+            # Validate command doesn't contain obvious injection patterns
+            injection_patterns = ['$(', '`', '${', '\n', '\r']
+            if any(p in command for p in injection_patterns):
+                return TestSummary(
+                    result=TestResult.ERROR,
+                    raw_output="Command validation failed: potentially unsafe characters detected"
+                )
+            result = subprocess.run(
+                command,
+                shell=True,
+                cwd=work_dir,
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
+        else:
+            # Safe path: use shlex.split to properly parse command
+            cmd_parts = shlex.split(command)
+            result = subprocess.run(
+                cmd_parts,
+                shell=False,
+                cwd=work_dir,
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
 
         output = result.stdout + result.stderr
         project_type = detect_project_type(work_dir)

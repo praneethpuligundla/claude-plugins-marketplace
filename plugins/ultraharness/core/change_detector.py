@@ -5,6 +5,10 @@ Classifies changes into:
 - trivial: Comments, formatting, imports only
 - significant: Logic changes, new functions, bug fixes
 - major: New files, large refactors, feature completions
+
+Performance optimizations:
+- Pre-compiled regex patterns (compiled once at module load)
+- Combined patterns into single regex where possible
 """
 
 import re
@@ -20,7 +24,8 @@ class ChangeLevel(Enum):
 
 
 # Patterns that indicate trivial changes (comments, whitespace, imports)
-TRIVIAL_PATTERNS = [
+# These are combined into a single compiled regex for performance
+_TRIVIAL_PATTERN_STRINGS = [
     r'^\s*#.*$',              # Python comments
     r'^\s*//.*$',             # JS/C++ line comments
     r'^\s*/\*.*\*/\s*$',      # Single-line block comments
@@ -34,8 +39,11 @@ TRIVIAL_PATTERNS = [
     r'^\s*require\(',         # CommonJS require
 ]
 
-# Patterns that indicate significant changes
-SIGNIFICANT_PATTERNS = [
+# Combine trivial patterns into single compiled regex for O(n) matching
+TRIVIAL_PATTERN_COMBINED = re.compile('|'.join(f'(?:{p})' for p in _TRIVIAL_PATTERN_STRINGS))
+
+# Patterns that indicate significant changes - pre-compiled for performance
+_SIGNIFICANT_PATTERN_STRINGS = [
     r'\bdef\s+\w+\s*\(',      # Python function definition
     r'\bclass\s+\w+',         # Class definition
     r'\bfunction\s+\w+\s*\(', # JS function definition
@@ -52,6 +60,9 @@ SIGNIFICANT_PATTERNS = [
     r'\bawait\s+',            # Await expressions
 ]
 
+# Combine significant patterns into single compiled regex
+SIGNIFICANT_PATTERN_COMBINED = re.compile('|'.join(f'(?:{p})' for p in _SIGNIFICANT_PATTERN_STRINGS))
+
 # File extensions that indicate code files
 CODE_EXTENSIONS = {
     '.py', '.js', '.ts', '.jsx', '.tsx', '.rs', '.go',
@@ -59,8 +70,8 @@ CODE_EXTENSIONS = {
     '.swift', '.kt', '.scala', '.php', '.vue', '.svelte'
 }
 
-# Test-related patterns in commands
-TEST_COMMAND_PATTERNS = [
+# Test-related patterns in commands - pre-compiled for performance
+_TEST_COMMAND_PATTERN_STRINGS = [
     r'\bnpm\s+test\b',
     r'\bpytest\b',
     r'\bcargo\s+test\b',
@@ -72,9 +83,10 @@ TEST_COMMAND_PATTERNS = [
     r'\bmvn\s+test\b',
     r'\bgradle\s+test\b',
 ]
+TEST_COMMAND_PATTERN = re.compile('|'.join(f'(?:{p})' for p in _TEST_COMMAND_PATTERN_STRINGS), re.IGNORECASE)
 
-# Build-related patterns in commands
-BUILD_COMMAND_PATTERNS = [
+# Build-related patterns in commands - pre-compiled for performance
+_BUILD_COMMAND_PATTERN_STRINGS = [
     r'\bnpm\s+run\s+build\b',
     r'\bcargo\s+build\b',
     r'\bgo\s+build\b',
@@ -83,6 +95,12 @@ BUILD_COMMAND_PATTERNS = [
     r'\bmake\b',
     r'\btsc\b',
 ]
+BUILD_COMMAND_PATTERN = re.compile('|'.join(f'(?:{p})' for p in _BUILD_COMMAND_PATTERN_STRINGS), re.IGNORECASE)
+
+# Git operation pattern - pre-compiled
+GIT_OPERATIONS_PATTERN = re.compile(r'\bgit\s+(add|status|diff|log|branch|checkout|push|pull)\b')
+GIT_COMMIT_PATTERN = re.compile(r'\bgit\s+commit\b')
+FILE_EXPLORATION_PATTERN = re.compile(r'^(ls|pwd|cd|cat|head|tail|find|grep)\b')
 
 
 def is_code_file(file_path: str) -> bool:
@@ -91,26 +109,25 @@ def is_code_file(file_path: str) -> bool:
 
 
 def count_non_trivial_lines(content: str) -> int:
-    """Count lines that aren't trivial (comments, whitespace, imports)."""
+    """Count lines that aren't trivial (comments, whitespace, imports).
+
+    Uses pre-compiled combined regex for O(n) matching instead of O(n*m).
+    """
     lines = content.split('\n')
     count = 0
     for line in lines:
-        is_trivial = False
-        for pattern in TRIVIAL_PATTERNS:
-            if re.match(pattern, line):
-                is_trivial = True
-                break
-        if not is_trivial and line.strip():
+        # Single regex match instead of iterating through all patterns
+        if line.strip() and not TRIVIAL_PATTERN_COMBINED.match(line):
             count += 1
     return count
 
 
 def has_significant_patterns(content: str) -> bool:
-    """Check if content contains significant code patterns."""
-    for pattern in SIGNIFICANT_PATTERNS:
-        if re.search(pattern, content):
-            return True
-    return False
+    """Check if content contains significant code patterns.
+
+    Uses pre-compiled combined regex for O(n) matching.
+    """
+    return bool(SIGNIFICANT_PATTERN_COMBINED.search(content))
 
 
 def classify_write(tool_input: Dict[str, Any]) -> Tuple[ChangeLevel, str]:
@@ -175,29 +192,30 @@ def classify_edit(tool_input: Dict[str, Any]) -> Tuple[ChangeLevel, str]:
 
 
 def classify_bash(tool_input: Dict[str, Any], tool_result: Any = None) -> Tuple[ChangeLevel, str]:
-    """Classify a Bash tool use."""
+    """Classify a Bash tool use.
+
+    Uses pre-compiled regex patterns for O(1) matching per pattern type.
+    """
     command = tool_input.get('command', '')
 
-    # Git commit is major
-    if re.search(r'\bgit\s+commit\b', command):
+    # Git commit is major (single regex check)
+    if GIT_COMMIT_PATTERN.search(command):
         return ChangeLevel.MAJOR, "Git commit"
 
-    # Test commands are significant
-    for pattern in TEST_COMMAND_PATTERNS:
-        if re.search(pattern, command, re.IGNORECASE):
-            return ChangeLevel.SIGNIFICANT, "Test execution"
+    # Test commands are significant (single combined regex check)
+    if TEST_COMMAND_PATTERN.search(command):
+        return ChangeLevel.SIGNIFICANT, "Test execution"
 
-    # Build commands are significant
-    for pattern in BUILD_COMMAND_PATTERNS:
-        if re.search(pattern, command, re.IGNORECASE):
-            return ChangeLevel.SIGNIFICANT, "Build execution"
+    # Build commands are significant (single combined regex check)
+    if BUILD_COMMAND_PATTERN.search(command):
+        return ChangeLevel.SIGNIFICANT, "Build execution"
 
     # Git operations (not commit) are minor but worth noting
-    if re.search(r'\bgit\s+(add|status|diff|log|branch|checkout|push|pull)\b', command):
+    if GIT_OPERATIONS_PATTERN.search(command):
         return ChangeLevel.TRIVIAL, "Git operation"
 
     # File system exploration is trivial
-    if re.search(r'^(ls|pwd|cd|cat|head|tail|find|grep)\b', command):
+    if FILE_EXPLORATION_PATTERN.search(command):
         return ChangeLevel.TRIVIAL, "File exploration"
 
     # Default to trivial for other commands

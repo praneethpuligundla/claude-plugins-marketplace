@@ -150,7 +150,12 @@ def main():
     """Main entry point for PreCompact hook."""
     try:
         # Read input from stdin
-        input_data = json.load(sys.stdin)
+        # Handle empty or invalid stdin gracefully
+        try:
+            stdin_content = sys.stdin.read()
+            input_data = json.loads(stdin_content) if stdin_content.strip() else {}
+        except (json.JSONDecodeError, ValueError):
+            input_data = {}
 
         session_id = input_data.get('session_id', 'default')
         work_dir = os.environ.get('CLAUDE_WORKING_DIRECTORY', os.getcwd())
