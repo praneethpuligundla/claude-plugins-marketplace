@@ -20,3 +20,9 @@ Thumbs.db
 
 # Project specific
 *.log
+
+# Go compiled binaries
+bin/
+*.exe
+*.dll
+*.dylib
