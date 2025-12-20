@@ -291,8 +291,7 @@ def main():
                 checkpoint_reason = f"Time-based checkpoint ({interval} min elapsed)"
 
         if suggest_checkpoint:
-            messages.append(f"[Harness] Consider creating a checkpoint: {checkpoint_reason}")
-            messages.append("Use `/harness:checkpoint <description>` to save progress.")
+            messages.append(f"[FIC] Consider creating a git checkpoint: {checkpoint_reason}")
 
         # Check for test result parsing (for Bash commands that ran tests)
         if tool_name == "Bash":
@@ -300,17 +299,9 @@ def main():
 
             if has_tests:
                 if tests_passed:
-                    # Tests passed - suggest updating feature status
-                    try:
-                        next_features = get_next_features(1, work_dir)
-                        if next_features and next_features[0].get('status') == 'in_progress':
-                            feature = next_features[0]
-                            messages.append(f"[Harness] Tests passed! Consider marking '{feature['name']}' as passing:")
-                            messages.append(f"Use `/harness:feature pass {feature['id']}`")
-                    except Exception:
-                        pass
+                    messages.append("[FIC] Tests passed! Implementation verification gate satisfied.")
                 elif tests_failed:
-                    messages.append("[Harness] Tests failed. Review failures before continuing.")
+                    messages.append("[FIC] Tests failed. Review failures before continuing.")
 
         # Save updated state
         save_session_state(session_id, state)

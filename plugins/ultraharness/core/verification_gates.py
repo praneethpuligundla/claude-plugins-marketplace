@@ -362,7 +362,7 @@ def check_edit_gate(
                 suggestions=[
                     "Finish codebase exploration first",
                     "Build research confidence to >= 70%",
-                    "Use /harness:configure relaxed to override"
+                    "Use /ultraharness:configure relaxed to override"
                 ],
                 details=details
             )
@@ -375,7 +375,7 @@ def check_edit_gate(
                 suggestions=[
                     "Validate your plan first",
                     "Use @fic-plan-validator",
-                    "Use /harness:configure relaxed to override"
+                    "Use /ultraharness:configure relaxed to override"
                 ],
                 details=details
             )

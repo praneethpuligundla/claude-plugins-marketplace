@@ -100,26 +100,10 @@ def validate_feature_focus(tool_name: str, tool_input: dict, work_dir: str) -> t
     current = get_current_feature(work_dir)
 
     if not current:
-        # No feature in progress - prompt to select one
-        try:
-            next_features = get_next_features(3, work_dir)
-            if next_features:
-                feature_list = '\n'.join([
-                    f"  {f['id']}. {f['name']}"
-                    for f in next_features
-                ])
-                return False, (
-                    f"[Harness] No feature currently in progress.\n"
-                    f"Consider starting one before making changes:\n{feature_list}\n"
-                    f"Use `/harness:feature start <id>` to begin."
-                )
-        except Exception:
-            pass
-
-        return False, (
-            "[Harness] No feature currently in progress. "
-            "Use `/harness:feature start <id>` to begin working on a feature."
-        )
+        # No feature in progress - FIC system handles phase enforcement automatically
+        # In ultraharness, we don't require manual feature commands
+        # The FIC gates will enforce proper workflow (research → plan → implement)
+        return True, None
 
     # Feature is in progress, allow the operation
     return True, None

@@ -49,10 +49,10 @@ You are initializing the agent harness for this project. This sets up the infras
    - Commit with message "Initialize agent harness for long-running workflows"
 
 5. Explain next steps:
-   - How to use `/ultraharness:status` to see current state
-   - How to use `/ultraharness:feature` to manage features
-   - How to use `/ultraharness:log` to add progress entries
-   - Remind them to commit checkpoints frequently
+   - The FIC system will automatically track workflow phases (Research → Plan → Implement)
+   - Use `/ultraharness:status` to see current FIC state and phase
+   - Verification gates will guide the workflow automatically
+   - Commit checkpoints frequently for recovery points
 
 ## File Templates
 

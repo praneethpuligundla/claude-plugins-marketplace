@@ -416,7 +416,7 @@ Option 2: Puppeteer
 npm install puppeteer
 
 After installation, enable browser automation:
-/harness:configure browser on
+/ultraharness:configure browser on
 
 Usage in verification:
 - Screenshots are saved to .claude/screenshots/

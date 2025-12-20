@@ -394,16 +394,16 @@ def build_context_message(work_dir):
     if not check_harness_initialized(work_dir):
         return {
             "systemMessage": (
-                "[Agent Harness] This project has not been initialized with the agent harness. "
-                "Run `/harness:init` to set up progress tracking, feature checklists, and git checkpoints. "
-                "This enables effective long-running agent workflows with automatic progress logging."
+                "[FIC System] This project has not been initialized. "
+                "Run `/ultraharness:init` to enable the FIC (Flow-Information-Context) system. "
+                "This provides automatic Research → Plan → Implement workflow with verification gates."
             )
         }
 
     # Load configuration
     config = load_config(work_dir)
 
-    messages.append("=== AGENT HARNESS SESSION STARTUP ===")
+    messages.append("=== FIC SYSTEM SESSION STARTUP ===")
     messages.append(f"Session started: {datetime.now().isoformat()}")
     messages.append(f"Working directory: {work_dir}")
     messages.append(f"Mode: {config.get('strictness', 'standard')}")
@@ -509,9 +509,8 @@ def build_context_message(work_dir):
         elif phase == 'IMPLEMENTATION':
             messages.append("IMPORTANT: Continue IMPLEMENTATION. Track progress against the plan.")
     else:
-        messages.append("IMPORTANT: Review the above context. Select the highest-priority feature to work on.")
-        if features and features['in_progress'] == 0 and features['failing'] > 0:
-            messages.append("Use `/harness:feature start <id>` to begin working on a feature.")
+        messages.append("IMPORTANT: Review the above context. For complex tasks, start with RESEARCH phase.")
+        messages.append("The FIC system will automatically track your workflow progression.")
 
     return {"systemMessage": '\n'.join(messages)}
 
