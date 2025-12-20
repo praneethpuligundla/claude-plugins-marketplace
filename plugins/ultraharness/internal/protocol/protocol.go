@@ -122,3 +122,66 @@ func (h *HookInput) GetCommand() string {
 	}
 	return ""
 }
+
+// GetPrompt extracts prompt from tool input (for UserPromptSubmit), returns empty string if not present
+func (h *HookInput) GetPrompt() string {
+	if h.ToolInput == nil {
+		return ""
+	}
+	if prompt, ok := h.ToolInput["prompt"].(string); ok {
+		return prompt
+	}
+	return ""
+}
+
+// GetSubagentType extracts subagent_type from tool input (for SubagentStop), returns empty string if not present
+func (h *HookInput) GetSubagentType() string {
+	if h.ToolInput == nil {
+		return ""
+	}
+	if t, ok := h.ToolInput["subagent_type"].(string); ok {
+		return t
+	}
+	return ""
+}
+
+// GetDescription extracts description from tool input (for SubagentStop), returns empty string if not present
+func (h *HookInput) GetDescription() string {
+	if h.ToolInput == nil {
+		return ""
+	}
+	if d, ok := h.ToolInput["description"].(string); ok {
+		return d
+	}
+	return ""
+}
+
+// GetOutput extracts output from tool input (for SubagentStop), returns empty string if not present
+func (h *HookInput) GetOutput() string {
+	if h.ToolInput == nil {
+		return ""
+	}
+	if o, ok := h.ToolInput["output"].(string); ok {
+		return o
+	}
+	return ""
+}
+
+// GetStopReason extracts stopReason or reason from tool input (for Stop), returns empty string if not present
+func (h *HookInput) GetStopReason() string {
+	if h.ToolInput == nil {
+		return ""
+	}
+	if r, ok := h.ToolInput["stopReason"].(string); ok {
+		return r
+	}
+	if r, ok := h.ToolInput["reason"].(string); ok {
+		return r
+	}
+	return ""
+}
+
+// WriteSystemMessage writes a system message response (alias for WriteMessage for clarity)
+func WriteSystemMessage(message string) error {
+	return WriteMessage(message)
+}
