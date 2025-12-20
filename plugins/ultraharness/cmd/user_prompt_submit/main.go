@@ -90,10 +90,15 @@ func run() error {
 		return protocol.WriteEmpty()
 	}
 
-	// Get prompt from input
+	// Get prompt from input (with size limit to prevent DoS)
 	prompt := input.GetPrompt()
 	if prompt == "" {
 		return protocol.WriteEmpty()
+	}
+	// Limit prompt size to prevent regex DoS
+	const maxPromptSize = 100000 // 100KB
+	if len(prompt) > maxPromptSize {
+		prompt = prompt[:maxPromptSize]
 	}
 
 	var messages []string

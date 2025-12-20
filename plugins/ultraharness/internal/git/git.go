@@ -118,7 +118,8 @@ func FileModified(workDir, filename string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain", filename)
+	// Use "--" to prevent filename from being interpreted as git option
+	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain", "--", filename)
 	cmd.Dir = workDir
 	output, err := cmd.Output()
 	if err != nil {

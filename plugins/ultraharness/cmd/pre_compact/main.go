@@ -71,12 +71,23 @@ func run() error {
 		sessionID = "default"
 	}
 
+	// Validate session ID to prevent injection
+	if err := validation.ValidateSessionID(sessionID); err != nil {
+		sessionID = "default"
+	}
+
 	var messages []string
 
-	// Get current phase info
+	// Get current phase info (with safe type assertions)
 	phaseInfo := artifacts.GetPhaseInfo(workDir)
-	phase := phaseInfo["phase"].(string)
-	details := phaseInfo["details"].(map[string]interface{})
+	phase, _ := phaseInfo["phase"].(string)
+	if phase == "" {
+		phase = "NEW_SESSION"
+	}
+	details, _ := phaseInfo["details"].(map[string]interface{})
+	if details == nil {
+		details = map[string]interface{}{}
+	}
 
 	// Load context state for additional info
 	var tokenEstimate int
