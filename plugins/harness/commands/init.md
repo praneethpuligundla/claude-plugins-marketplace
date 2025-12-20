@@ -39,14 +39,15 @@ You are initializing the agent harness for this project. This sets up the infras
    - Create .claude/.claude-harness-initialized marker
    - Optionally create init.sh
 
-3. If the user has features to track:
+3. **Auto-gitignore harness files** (these are local-only, not committed):
+   - Check if .gitignore exists, create if not
+   - Add entries for: `.claude/`, `claude-progress.txt`, `claude-features.json`
+   - Commit the .gitignore update (not the harness files themselves)
+
+4. If the user has features to track:
    - Ask them to list all features/requirements
    - Add each to claude-features.json with status "failing"
    - Prioritize them
-
-4. Make an initial git commit:
-   - Stage the new harness files
-   - Commit with message "Initialize agent harness for long-running workflows"
 
 5. Explain next steps:
    - How to use `/harness:status` to see current state
@@ -95,6 +96,14 @@ You are initializing the agent harness for this project. This sets up the infras
 # docker-compose up -d
 
 echo "Development environment ready"
+```
+
+### .gitignore entries to add
+```
+# Agent harness (local-only files)
+.claude/
+claude-progress.txt
+claude-features.json
 ```
 
 IMPORTANT: Be thorough in gathering requirements. The feature list is critical - it prevents the agent from claiming work is complete prematurely.
