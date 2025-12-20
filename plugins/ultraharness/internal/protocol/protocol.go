@@ -18,6 +18,8 @@ type HookInput struct {
 	ToolName   string                 `json:"tool_name"`
 	ToolInput  map[string]interface{} `json:"tool_input"`
 	ToolResult string                 `json:"tool_result,omitempty"`
+	// UserPromptSubmit-specific fields
+	Prompt string `json:"prompt,omitempty"`
 }
 
 // HookOutput represents the JSON output from hooks to Claude Code
@@ -123,8 +125,13 @@ func (h *HookInput) GetCommand() string {
 	return ""
 }
 
-// GetPrompt extracts prompt from tool input (for UserPromptSubmit), returns empty string if not present
+// GetPrompt extracts prompt from input (for UserPromptSubmit), returns empty string if not present
 func (h *HookInput) GetPrompt() string {
+	// Check top-level prompt field first (UserPromptSubmit format)
+	if h.Prompt != "" {
+		return h.Prompt
+	}
+	// Fallback to tool_input for backwards compatibility
 	if h.ToolInput == nil {
 		return ""
 	}
