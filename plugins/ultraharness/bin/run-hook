@@ -1,0 +1,39 @@
+#!/bin/bash
+# Platform-detection wrapper for Go hook binaries
+# Usage: run-hook <hook_name>
+
+HOOK_NAME="$1"
+if [ -z "$HOOK_NAME" ]; then
+    echo '{"systemMessage":"[Harness] Error: No hook name provided"}'
+    exit 0
+fi
+
+# Detect platform
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m)
+
+# Map architecture names
+case "$ARCH" in
+    x86_64)  ARCH="amd64" ;;
+    aarch64) ARCH="arm64" ;;
+    arm64)   ARCH="arm64" ;;
+esac
+
+# Build binary path
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+BINARY="$SCRIPT_DIR/${OS}-${ARCH}/${HOOK_NAME}"
+
+# Check if binary exists
+if [ ! -x "$BINARY" ]; then
+    # Fallback to Python if binary not found
+    PYTHON_HOOK="${CLAUDE_PLUGIN_ROOT}/hooks/${HOOK_NAME}.py"
+    if [ -f "$PYTHON_HOOK" ]; then
+        exec python3 "$PYTHON_HOOK"
+    else
+        echo '{"systemMessage":"[Harness] Error: Hook binary not found"}'
+        exit 0
+    fi
+fi
+
+# Execute the Go binary
+exec "$BINARY"

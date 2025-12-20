@@ -21,8 +21,10 @@ Thumbs.db
 # Project specific
 *.log
 
-# Go compiled binaries
+# Go compiled binaries (but keep wrapper script)
 bin/
+!bin/run-hook
 *.exe
 *.dll
 *.dylib
+firebase-debug.log

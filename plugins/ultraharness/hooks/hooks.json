@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/run-hook session_start",
             "timeout": 120
           }
         ]
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/user_prompt_submit.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/run-hook user_prompt_submit",
             "timeout": 10
           }
         ]
@@ -31,7 +31,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/pre_tool_use.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/run-hook pre_tool_use",
             "timeout": 10
           }
         ]
@@ -43,7 +43,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/post_tool_use.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/run-hook post_tool_use",
             "timeout": 15
           }
         ]
@@ -55,7 +55,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/subagent_stop.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/run-hook subagent_stop",
             "timeout": 30
           }
         ]
@@ -67,7 +67,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/pre_compact.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/run-hook pre_compact",
             "timeout": 30
           }
         ]
@@ -79,7 +79,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/stop.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/run-hook stop",
             "timeout": 15
           }
         ]
