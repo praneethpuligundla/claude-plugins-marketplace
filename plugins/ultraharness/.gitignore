@@ -21,9 +21,7 @@ Thumbs.db
 # Project specific
 *.log
 
-# Go compiled binaries (but keep wrapper script)
-bin/
-!bin/run-hook
+# Go binaries - keep pre-built platform binaries for distribution
 *.exe
 *.dll
 *.dylib
