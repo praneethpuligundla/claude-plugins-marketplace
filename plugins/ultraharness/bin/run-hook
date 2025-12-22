@@ -1,45 +1,22 @@
 #!/bin/bash
 # Auto-detect platform and run the appropriate Go binary hook
-# Falls back to Python if binary not available
-
 set -e
-
 HOOK_NAME="$1"
 shift 2>/dev/null || true
-
-# Get script directory
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PLUGIN_ROOT="$(dirname "$SCRIPT_DIR")"
-
-# Detect platform
-OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+OS="$(uname -s | tr "[:upper:]" "[:lower:]")"
 ARCH="$(uname -m)"
-
-# Map architecture names
 case "$ARCH" in
-    x86_64|amd64)
-        ARCH="amd64"
-        ;;
-    arm64|aarch64)
-        ARCH="arm64"
-        ;;
-    *)
-        # Unsupported architecture, fall back to Python
-        exec python3 "${PLUGIN_ROOT}/hooks/${HOOK_NAME}.py" "$@"
-        ;;
+    x86_64|amd64) ARCH="amd64" ;;
+    arm64|aarch64) ARCH="arm64" ;;
+    *) exec python3 "${PLUGIN_ROOT}/hooks/${HOOK_NAME}.py" "$@" ;;
 esac
-
-# Build platform string
 PLATFORM="${OS}-${ARCH}"
-
-# Path to Go binary
 GO_BINARY="${SCRIPT_DIR}/${PLATFORM}/${HOOK_NAME}"
-
-# Check if Go binary exists and is executable
 if [ -x "$GO_BINARY" ]; then
     exec "$GO_BINARY" "$@"
 else
-    # Fall back to Python hook
     PYTHON_HOOK="${PLUGIN_ROOT}/hooks/${HOOK_NAME}.py"
     if [ -f "$PYTHON_HOOK" ]; then
         exec python3 "$PYTHON_HOOK" "$@"

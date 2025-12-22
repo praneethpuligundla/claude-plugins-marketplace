@@ -26,3 +26,8 @@ Thumbs.db
 *.dll
 *.dylib
 firebase-debug.log
+
+# Ultraharness local files
+claude-progress.txt
+.claude/fic-*.json
+.claude/.claude-harness-initialized

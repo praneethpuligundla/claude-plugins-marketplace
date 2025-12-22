@@ -19,7 +19,39 @@ build-local:
 	done
 
 # Build all platforms for distribution
-all: $(foreach p,$(PLATFORMS),$(foreach h,$(HOOKS),bin/$(p)/$(h)))
+all: $(foreach p,$(PLATFORMS),$(foreach h,$(HOOKS),bin/$(p)/$(h))) bin/run-hook
+
+# Platform auto-detection wrapper script
+bin/run-hook:
+	@mkdir -p bin
+	@echo '#!/bin/bash' > $@
+	@echo '# Auto-detect platform and run the appropriate Go binary hook' >> $@
+	@echo 'set -e' >> $@
+	@echo 'HOOK_NAME="$$1"' >> $@
+	@echo 'shift 2>/dev/null || true' >> $@
+	@echo 'SCRIPT_DIR="$$(cd "$$(dirname "$$0")" && pwd)"' >> $@
+	@echo 'PLUGIN_ROOT="$$(dirname "$$SCRIPT_DIR")"' >> $@
+	@echo 'OS="$$(uname -s | tr "[:upper:]" "[:lower:]")"' >> $@
+	@echo 'ARCH="$$(uname -m)"' >> $@
+	@echo 'case "$$ARCH" in' >> $@
+	@echo '    x86_64|amd64) ARCH="amd64" ;;' >> $@
+	@echo '    arm64|aarch64) ARCH="arm64" ;;' >> $@
+	@echo '    *) exec python3 "$${PLUGIN_ROOT}/hooks/$${HOOK_NAME}.py" "$$@" ;;' >> $@
+	@echo 'esac' >> $@
+	@echo 'PLATFORM="$${OS}-$${ARCH}"' >> $@
+	@echo 'GO_BINARY="$${SCRIPT_DIR}/$${PLATFORM}/$${HOOK_NAME}"' >> $@
+	@echo 'if [ -x "$$GO_BINARY" ]; then' >> $@
+	@echo '    exec "$$GO_BINARY" "$$@"' >> $@
+	@echo 'else' >> $@
+	@echo '    PYTHON_HOOK="$${PLUGIN_ROOT}/hooks/$${HOOK_NAME}.py"' >> $@
+	@echo '    if [ -f "$$PYTHON_HOOK" ]; then' >> $@
+	@echo '        exec python3 "$$PYTHON_HOOK" "$$@"' >> $@
+	@echo '    else' >> $@
+	@echo '        echo "{\"systemMessage\": \"[Harness] Hook not found: $$HOOK_NAME\"}"' >> $@
+	@echo '        exit 0' >> $@
+	@echo '    fi' >> $@
+	@echo 'fi' >> $@
+	@chmod +x $@
 
 # Darwin ARM64 (Apple Silicon)
 bin/darwin-arm64/%: cmd/%/main.go
