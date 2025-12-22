@@ -8,6 +8,7 @@ Advanced Claude Code plugin with **FIC (Flow-Information-Context) System** for i
 
 Long-running AI agents struggle across multiple context windows because each new session begins without memory of prior work. This plugin solves that problem by providing:
 
+- **Zero Configuration** - Auto-initializes on first session, no setup commands required
 - **FIC System** - Automatic Research → Plan → Implement workflow with verification gates
 - **Context Intelligence** - Tracks what information enters context, detects redundancy
 - **Progress Tracking** - Persistent log file (`claude-progress.txt`) that records accomplishments
@@ -15,6 +16,7 @@ Long-running AI agents struggle across multiple context windows because each new
 - **Git Checkpoints** - Encourages frequent commits as safe recovery points
 - **Session Startup Routine** - Automatically reads context and FIC state at session start
 - **Subagent Orchestration** - Auto-suggests delegation to keep main context clean
+- **Native Performance** - Go binaries with Python fallback for cross-platform support
 
 Based on:
 - [Effective Harnesses for Long-Running Agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
@@ -36,6 +38,8 @@ claude plugins:add https://github.com/praneethpuligundla/ultraharness
 
 The plugin is installed at user scope and applies to all Claude Code projects.
 
+**Zero configuration required** - the plugin auto-initializes on first session start.
+
 ### Upgrading from Harness
 
 If you're using the lightweight [harness](https://github.com/praneethpuligundla/harness) plugin:
@@ -45,20 +49,19 @@ claude plugins:remove harness
 claude plugins:add praneethpuligundla/ultraharness
 ```
 
-Then run `/ultraharness:init` in your project. Existing `claude-progress.txt` and `claude-features.json` files are preserved - UltraHarness adds FIC artifacts alongside them.
+Existing `claude-progress.txt` and `claude-features.json` files are preserved - UltraHarness adds FIC artifacts alongside them.
 
 ## Usage
 
-### Initialize a Project
+### Automatic Initialization
 
-```
-/ultraharness:init
-```
-
-This creates:
+The plugin **auto-initializes** on first session - no manual setup required. On first run it creates:
 - `.claude/.claude-harness-initialized` - Marker file
-- `.claude/claude-harness.json` - FIC configuration
-- `.claude/fic-artifacts/` - Artifact storage directories
+- `.claude/claude-harness.json` - FIC configuration with sensible defaults
+- `claude-progress.txt` - Progress log
+- `.gitignore` entries - Prevents committing local harness state
+
+You can also manually initialize with `/ultraharness:init` if needed.
 
 ### Check Status
 
@@ -276,34 +279,60 @@ project/
 
 ## Plugin Structure
 
+The plugin uses **native Go binaries** for performance with Python fallback for compatibility.
+
 ```
 ultraharness/
 ├── .claude-plugin/
-│   └── plugin.json
-├── hooks/
-│   ├── hooks.json
-│   ├── session_start.py     # Session startup with FIC state
-│   ├── user_prompt_submit.py # Auto-delegation detection
-│   ├── pre_tool_use.py      # Verification gates
-│   ├── post_tool_use.py     # Context intelligence tracking
-│   ├── pre_compact.py       # Context preservation
-│   ├── subagent_stop.py     # Research result processing
-│   └── stop.py
+│   └── plugin.json           # Plugin manifest
+├── cmd/                      # Go hook entry points
+│   ├── session_start/        # Session startup with FIC state
+│   ├── user_prompt_submit/   # Auto-delegation detection
+│   ├── pre_tool_use/         # Verification gates
+│   ├── post_tool_use/        # Context intelligence tracking
+│   ├── pre_compact/          # Context preservation
+│   ├── subagent_stop/        # Research result processing
+│   └── stop/                 # Session stop validation
+├── internal/                 # Shared Go packages
+│   ├── protocol/             # JSON stdin/stdout communication
+│   ├── config/               # Configuration management
+│   ├── validation/           # Input validation
+│   ├── git/                  # Git operations
+│   ├── artifacts/            # FIC artifact management
+│   ├── context/              # Context tracking
+│   ├── gates/                # Verification gates
+│   ├── progress/             # Progress file handling
+│   ├── features/             # Feature checklist
+│   └── testrunner/           # Test execution
+├── bin/                      # Cross-compiled binaries
+│   ├── run-hook              # Platform auto-detection wrapper
+│   ├── darwin-arm64/         # Apple Silicon
+│   ├── darwin-amd64/         # Intel Mac
+│   └── linux-amd64/          # Linux
+├── hooks/                    # Python fallbacks + config
+│   ├── hooks.json            # Hook definitions
+│   └── *.py                  # Python implementations
 ├── agents/
-│   ├── fic-researcher.md    # Research subagent definition
+│   ├── fic-researcher.md     # Research subagent definition
 │   └── fic-plan-validator.md # Plan validation subagent
 ├── commands/
 │   ├── init.md
 │   ├── status.md
 │   ├── configure.md
 │   └── baseline.md
-├── core/
-│   ├── config.py            # Configuration with FIC settings
-│   ├── progress.py
-│   ├── features.py
-│   ├── context_intelligence.py  # FIC context tracking
-│   ├── artifacts.py         # FIC artifact definitions
-│   ├── verification_gates.py # FIC gate logic
-│   └── ...
+├── Makefile                  # Cross-compilation build
 └── README.md
+```
+
+### Architecture
+
+- **Go binaries** - Native performance (~2MB each, cross-compiled)
+- **Platform auto-detection** - `bin/run-hook` detects OS/arch and runs appropriate binary
+- **Python fallback** - If binary unavailable, falls back to Python implementation
+- **Shared packages** - Common logic in `internal/` (protocol, config, git, etc.)
+
+Build for all platforms:
+```bash
+make all    # Builds darwin-arm64, darwin-amd64, linux-amd64
+make test   # Run tests
 ```
