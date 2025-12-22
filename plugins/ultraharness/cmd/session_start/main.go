@@ -45,18 +45,21 @@ func run() error {
 	// Get working directory
 	workDir := validation.GetWorkDir()
 	if workDir == "" {
-		return writeInitMessage()
+		return protocol.WriteEmpty()
 	}
 
-	// Check if harness is initialized
+	// Auto-initialize if not already done (zero user input required)
 	if !config.IsHarnessInitialized(workDir) {
-		return writeInitMessage()
+		if err := autoInitialize(workDir); err != nil {
+			// Initialization failed, continue without harness
+			return protocol.WriteEmpty()
+		}
 	}
 
 	// Load config
 	cfg, err := config.Load(workDir)
 	if err != nil {
-		return writeInitMessage()
+		cfg = config.DefaultConfig()
 	}
 
 	// Build context message
@@ -325,4 +328,92 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// autoInitialize sets up the harness with zero user input.
+// Creates .claude directory, marker file, and default config.
+func autoInitialize(workDir string) error {
+	claudeDir := filepath.Join(workDir, ".claude")
+
+	// Create .claude directory if it doesn't exist
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		return fmt.Errorf("failed to create .claude directory: %w", err)
+	}
+
+	// Create marker file
+	markerPath := filepath.Join(claudeDir, config.InitMarkerFileName)
+	markerContent := fmt.Sprintf("# Ultraharness initialized\n# Auto-initialized: %s\n", time.Now().Format(time.RFC3339))
+	if err := os.WriteFile(markerPath, []byte(markerContent), 0644); err != nil {
+		return fmt.Errorf("failed to create marker file: %w", err)
+	}
+
+	// Write default config
+	configPath := filepath.Join(claudeDir, config.ConfigFileName)
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		defaultCfg := config.DefaultConfig()
+		configData, err := json.MarshalIndent(defaultCfg, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal config: %w", err)
+		}
+		if err := os.WriteFile(configPath, configData, 0644); err != nil {
+			return fmt.Errorf("failed to write config: %w", err)
+		}
+	}
+
+	// Create initial progress file with auto-init entry
+	progressPath := progress.GetProgressPath(workDir)
+	if _, err := os.Stat(progressPath); os.IsNotExist(err) {
+		initialProgress := fmt.Sprintf("# Ultraharness Progress Log\n# Auto-initialized: %s\n\n", time.Now().Format(time.RFC3339))
+		if err := os.WriteFile(progressPath, []byte(initialProgress), 0600); err != nil {
+			// Non-fatal - progress file is optional
+		}
+	}
+
+	// Update .gitignore to ignore harness-specific files
+	updateGitignore(workDir)
+
+	return nil
+}
+
+// updateGitignore adds harness files to .gitignore
+func updateGitignore(workDir string) {
+	gitignorePath := filepath.Join(workDir, ".gitignore")
+
+	harnessIgnores := []string{
+		"# Ultraharness local files",
+		"claude-progress.txt",
+		".claude/fic-*.json",
+		".claude/.claude-harness-initialized",
+	}
+
+	// Read existing .gitignore
+	existing := ""
+	if data, err := os.ReadFile(gitignorePath); err == nil {
+		existing = string(data)
+	}
+
+	// Check which entries need to be added
+	var toAdd []string
+	for _, entry := range harnessIgnores {
+		if !strings.Contains(existing, entry) {
+			toAdd = append(toAdd, entry)
+		}
+	}
+
+	if len(toAdd) == 0 {
+		return
+	}
+
+	// Append new entries
+	f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	// Add newline if file doesn't end with one
+	if len(existing) > 0 && existing[len(existing)-1] != '\n' {
+		f.WriteString("\n")
+	}
+	f.WriteString("\n" + strings.Join(toAdd, "\n") + "\n")
 }
