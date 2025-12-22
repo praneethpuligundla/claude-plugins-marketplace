@@ -3,7 +3,9 @@
 // This hook runs when a session is stopping to:
 // 1. Check if tests were run (if code was modified)
 // 2. Check for uncommitted changes
-// 3. Validate merge-ready state
+// 3. Check for features still in progress
+// 4. Check if progress log was updated
+// 5. Validate merge-ready state
 //
 // Behavior by strictness mode:
 // - strict: Block if validation fails
@@ -16,9 +18,11 @@ import (
 	"strings"
 
 	"ultraharness/internal/config"
+	"ultraharness/internal/features"
 	"ultraharness/internal/git"
 	"ultraharness/internal/progress"
 	"ultraharness/internal/protocol"
+	"ultraharness/internal/testrunner"
 	"ultraharness/internal/validation"
 )
 
@@ -57,12 +61,15 @@ func run() error {
 	stopReason := input.GetStopReason()
 
 	// Only validate for normal stops (not errors/interrupts)
-	if stopReason != "end_turn" && stopReason != "stop_sequence" && stopReason != "" {
+	if stopReason != "end_turn" && stopReason != "stop_sequence" && stopReason != "" && stopReason != "unknown" {
 		return protocol.WriteEmpty()
 	}
 
+	// Get transcript for test detection
+	transcript := input.GetTranscript()
+
 	// Run validation
-	canStop, blockingReasons, warnings := validateStop(workDir, cfg)
+	canStop, blockingReasons, warnings := validateStop(workDir, cfg, transcript)
 
 	// Handle based on strictness mode
 	if cfg.IsStrictMode() {
@@ -73,15 +80,18 @@ func run() error {
 	return handleRelaxedMode(blockingReasons, warnings)
 }
 
-func validateStop(workDir string, cfg *config.Config) (bool, []string, []string) {
+func validateStop(workDir string, cfg *config.Config, transcript string) (bool, []string, []string) {
 	var blockingReasons []string
 	var warnings []string
 
-	// Check 1: Code was modified but tests weren't run
-	// (simplified - we don't track test runs in this implementation)
-	if git.CodeWasModified(workDir) {
-		// We could track test runs via context, but for now just warn
-		warnings = append(warnings, "Code was modified - ensure tests were run before stopping")
+	codeModified := git.CodeWasModified(workDir)
+
+	// Check 1: Tests not run (if code was modified)
+	if codeModified {
+		testsRan := testrunner.DidTestsRun(transcript)
+		if !testsRan {
+			blockingReasons = append(blockingReasons, "Code was modified but tests were not run")
+		}
 	}
 
 	// Check 2: Uncommitted changes
@@ -89,10 +99,27 @@ func validateStop(workDir string, cfg *config.Config) (bool, []string, []string)
 		warnings = append(warnings, "Uncommitted changes exist - consider creating a checkpoint")
 	}
 
-	// Check 3: Progress log not updated
-	progressPath := progress.GetProgressPath(workDir)
-	if !git.FileModified(workDir, progressPath) && git.CodeWasModified(workDir) {
-		warnings = append(warnings, "Progress log not updated - consider logging your accomplishments")
+	// Check 3: Features still in progress
+	if features.Exists(workDir) {
+		inProgress, err := features.GetInProgress(workDir)
+		if err == nil && len(inProgress) > 0 {
+			featureNames := make([]string, 0, 3)
+			for i, f := range inProgress {
+				if i >= 3 {
+					break
+				}
+				featureNames = append(featureNames, f.Name)
+			}
+			warnings = append(warnings, "Features still in progress: "+strings.Join(featureNames, ", "))
+		}
+	}
+
+	// Check 4: Progress log not updated
+	if codeModified {
+		progressPath := progress.GetProgressPath(workDir)
+		if !git.FileModified(workDir, progressPath) {
+			warnings = append(warnings, "Progress log not updated - consider logging your accomplishments")
+		}
 	}
 
 	// Determine if stopping is allowed

@@ -188,6 +188,23 @@ func (h *HookInput) GetStopReason() string {
 	return ""
 }
 
+// GetTranscript extracts transcript or conversation_transcript from tool input
+func (h *HookInput) GetTranscript() string {
+	if h.ToolInput == nil {
+		return ""
+	}
+	if t, ok := h.ToolInput["transcript"].(string); ok {
+		return t
+	}
+	if t, ok := h.ToolInput["conversation_transcript"].(string); ok {
+		return t
+	}
+	if t, ok := h.ToolInput["transcript_path"].(string); ok {
+		return t
+	}
+	return ""
+}
+
 // WriteSystemMessage writes a system message response (alias for WriteMessage for clarity)
 func WriteSystemMessage(message string) error {
 	return WriteMessage(message)

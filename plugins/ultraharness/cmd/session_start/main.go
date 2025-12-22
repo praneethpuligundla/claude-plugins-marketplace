@@ -4,9 +4,12 @@
 // 1. Check if harness is initialized for the current project
 // 2. Load FIC state: phase, confidence, artifacts
 // 3. Show preserved context from prior sessions
-// 4. Display git status and recent commits
-// 5. Read progress file for context
-// 6. Inject context into the session via systemMessage
+// 4. Execute init.sh if it exists
+// 5. Run baseline tests if configured
+// 6. Display git status and recent commits
+// 7. Read progress file for context
+// 8. Read feature checklist status
+// 9. Inject context into the session via systemMessage
 package main
 
 import (
@@ -19,9 +22,12 @@ import (
 
 	"ultraharness/internal/artifacts"
 	"ultraharness/internal/config"
+	"ultraharness/internal/features"
 	"ultraharness/internal/git"
+	"ultraharness/internal/initscript"
 	"ultraharness/internal/progress"
 	"ultraharness/internal/protocol"
+	"ultraharness/internal/testrunner"
 	"ultraharness/internal/validation"
 )
 
@@ -73,11 +79,39 @@ func writeContextMessage(workDir string, cfg *config.Config) error {
 	messages = append(messages, fmt.Sprintf("Mode: %s", cfg.Strictness))
 	messages = append(messages, "")
 
-	// FIC Workflow State
+	// FIC Workflow State (High Priority)
 	if cfg.FICEnabled {
 		ficMessages := formatFICState(workDir)
 		if len(ficMessages) > 0 {
 			messages = append(messages, ficMessages...)
+		}
+	}
+
+	// Run init script
+	if cfg.InitScriptExecution {
+		initResult := initscript.Run(workDir, 0)
+		if resultStr := initscript.GetResultString(initResult); resultStr != "" {
+			messages = append(messages, "--- INIT SCRIPT ---")
+			messages = append(messages, resultStr)
+			messages = append(messages, "")
+		}
+	}
+
+	// Run baseline tests
+	if cfg.BaselineTestsOnStartup {
+		testSummary := testrunner.Run(workDir, testrunner.DefaultTimeout)
+		if testSummary.Result != testrunner.NotRun {
+			messages = append(messages, "--- BASELINE TESTS ---")
+			summaryStr := testrunner.GetSummaryString(testSummary)
+			if testSummary.Result == testrunner.Passed {
+				messages = append(messages, fmt.Sprintf("Baseline tests PASSED: %s", summaryStr))
+			} else if testSummary.Result == testrunner.Failed {
+				messages = append(messages, fmt.Sprintf("WARNING: Baseline tests FAILING: %s", summaryStr))
+				messages = append(messages, "Review failures before making changes.")
+			} else {
+				messages = append(messages, fmt.Sprintf("Baseline test error: %s", testSummary.RawOutput[:min(200, len(testSummary.RawOutput))]))
+			}
+			messages = append(messages, "")
 		}
 	}
 
@@ -116,6 +150,33 @@ func writeContextMessage(workDir string, cfg *config.Config) error {
 		messages = append(messages, "")
 	}
 
+	// Features checklist
+	if features.Exists(workDir) {
+		summary, err := features.GetSummary(workDir)
+		if err == nil {
+			messages = append(messages, "--- FEATURE CHECKLIST STATUS ---")
+			messages = append(messages, fmt.Sprintf("Total: %d | Passing: %d | Failing: %d | In Progress: %d",
+				summary.Total, summary.Passing, summary.Failing, summary.InProgress))
+
+			if len(summary.NextItems) > 0 {
+				messages = append(messages, "")
+				messages = append(messages, "Next priority items:")
+				for _, item := range summary.NextItems {
+					statusIcon := "[TODO]"
+					if item.Status == "in_progress" {
+						statusIcon = "[WIP]"
+					}
+					desc := item.Description
+					if len(desc) > 60 {
+						desc = desc[:60] + "..."
+					}
+					messages = append(messages, fmt.Sprintf("  %s %s. %s: %s", statusIcon, item.ID, item.Name, desc))
+				}
+			}
+			messages = append(messages, "")
+		}
+	}
+
 	messages = append(messages, "=== END SESSION CONTEXT ===")
 	messages = append(messages, "")
 
@@ -123,6 +184,12 @@ func writeContextMessage(workDir string, cfg *config.Config) error {
 	var autoFeatures []string
 	if cfg.AutoProgressLogging {
 		autoFeatures = append(autoFeatures, "auto-logging")
+	}
+	if cfg.AutoCheckpointSuggestions {
+		autoFeatures = append(autoFeatures, "checkpoint suggestions")
+	}
+	if cfg.FeatureEnforcement {
+		autoFeatures = append(autoFeatures, "feature enforcement")
 	}
 	if cfg.FICEnabled {
 		autoFeatures = append(autoFeatures, "FIC context tracking")
@@ -251,4 +318,11 @@ func getPhaseGuidance(phase string) string {
 	default:
 		return "IMPORTANT: Review the above context. For complex tasks, start with RESEARCH phase.\nThe FIC system will automatically track your workflow progression."
 	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
