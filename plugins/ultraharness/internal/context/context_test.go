@@ -3,6 +3,7 @@ package context
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -27,7 +28,7 @@ func TestLoadContextState(t *testing.T) {
 		}
 	})
 
-	t.Run("different session ID returns fresh state", func(t *testing.T) {
+	t.Run("different session ID persists state (no reset)", func(t *testing.T) {
 		tmpDir, err := os.MkdirTemp("", "context-test")
 		if err != nil {
 			t.Fatalf("Failed to create temp dir: %v", err)
@@ -39,6 +40,7 @@ func TestLoadContextState(t *testing.T) {
 			SessionID:          "old-session",
 			TotalTokenEstimate: 5000,
 			EntryCount:         10,
+			TotalToolCalls:     10,
 		}
 		oldState.Save(tmpDir)
 
@@ -48,12 +50,19 @@ func TestLoadContextState(t *testing.T) {
 			t.Fatalf("LoadContextState() error = %v", err)
 		}
 
-		// Should get fresh state, not old one
+		// Session ID should change but data should persist
 		if state.SessionID != "new-session" {
 			t.Errorf("SessionID = %v, want 'new-session'", state.SessionID)
 		}
-		if state.TotalTokenEstimate != 0 {
-			t.Errorf("TotalTokenEstimate = %v, want 0 for new session", state.TotalTokenEstimate)
+		if state.LastSessionID != "old-session" {
+			t.Errorf("LastSessionID = %v, want 'old-session'", state.LastSessionID)
+		}
+		// Context state should persist, not reset
+		if state.TotalTokenEstimate != 5000 {
+			t.Errorf("TotalTokenEstimate = %v, want 5000 (persisted)", state.TotalTokenEstimate)
+		}
+		if state.TotalToolCalls != 10 {
+			t.Errorf("TotalToolCalls = %v, want 10 (persisted)", state.TotalToolCalls)
 		}
 	})
 
@@ -120,28 +129,70 @@ func TestContextStateSave(t *testing.T) {
 }
 
 func TestAddEntry(t *testing.T) {
-	state := &ContextState{
-		SessionID: "test",
-	}
+	t.Run("tracks tool calls by type", func(t *testing.T) {
+		state := &ContextState{SessionID: "test"}
 
-	// Add an entry
-	state.AddEntry("Read", "This is a 40 character result string....")
+		state.AddEntry("Read", "file content here")
+		state.AddEntry("Read", "more content")
+		state.AddEntry("Grep", "search results")
+		state.AddEntry("Edit", "edit result")
 
-	if state.EntryCount != 1 {
-		t.Errorf("EntryCount = %v, want 1", state.EntryCount)
-	}
+		if state.TotalToolCalls != 4 {
+			t.Errorf("TotalToolCalls = %v, want 4", state.TotalToolCalls)
+		}
+		if state.ToolCalls.Read != 2 {
+			t.Errorf("ToolCalls.Read = %v, want 2", state.ToolCalls.Read)
+		}
+		if state.ToolCalls.Grep != 1 {
+			t.Errorf("ToolCalls.Grep = %v, want 1", state.ToolCalls.Grep)
+		}
+		if state.ToolCalls.Edit != 1 {
+			t.Errorf("ToolCalls.Edit = %v, want 1", state.ToolCalls.Edit)
+		}
+	})
 
-	// Token estimate should be roughly len/4
-	expectedTokens := 40 / 4
-	if state.TotalTokenEstimate != expectedTokens {
-		t.Errorf("TotalTokenEstimate = %v, want %v", state.TotalTokenEstimate, expectedTokens)
-	}
+	t.Run("uses weighted token estimates", func(t *testing.T) {
+		state := &ContextState{SessionID: "test"}
 
-	// Utilization should be calculated
-	expectedUtil := float64(expectedTokens) / float64(MaxContextTokens)
-	if state.UtilizationPercent != expectedUtil {
-		t.Errorf("UtilizationPercent = %v, want %v", state.UtilizationPercent, expectedUtil)
-	}
+		// Read has weight 1500 + base overhead 400 = 1900 min
+		state.AddEntry("Read", "short")
+
+		// Should use weighted estimate (1500) not just len/4 (1)
+		if state.TotalTokenEstimate < 1500 {
+			t.Errorf("TotalTokenEstimate = %v, want >= 1500 (weighted)", state.TotalTokenEstimate)
+		}
+	})
+
+	t.Run("uses actual result size when larger than weight", func(t *testing.T) {
+		state := &ContextState{SessionID: "test"}
+
+		// Create a large result (8000 chars = ~2000 tokens, larger than Read weight of 1500)
+		largeResult := strings.Repeat("x", 8000)
+		state.AddEntry("Read", largeResult)
+
+		// Should use actual size (2000) + overhead, not weight (1500)
+		if state.TotalTokenEstimate < 2000 {
+			t.Errorf("TotalTokenEstimate = %v, want >= 2000 (actual result size)", state.TotalTokenEstimate)
+		}
+	})
+
+	t.Run("calculates utilization correctly", func(t *testing.T) {
+		state := &ContextState{SessionID: "test"}
+
+		// Add many entries to accumulate tokens
+		for i := 0; i < 50; i++ {
+			state.AddEntry("Read", "content")
+		}
+
+		// Should have accumulated significant utilization
+		if state.UtilizationPercent <= 0 {
+			t.Errorf("UtilizationPercent = %v, want > 0", state.UtilizationPercent)
+		}
+		// Check reasonable bounds
+		if state.UtilizationPercent > 1.0 {
+			t.Errorf("UtilizationPercent = %v, should not exceed 1.0", state.UtilizationPercent)
+		}
+	})
 }
 
 func TestNeedsCompaction(t *testing.T) {
@@ -166,11 +217,135 @@ func TestNeedsCompaction(t *testing.T) {
 	}
 }
 
+func TestNeedsCompactionByToolCount(t *testing.T) {
+	tests := []struct {
+		name       string
+		toolCalls  int
+		maxTools   int
+		wantResult bool
+	}{
+		{"below limit", 30, 50, false},
+		{"at limit", 50, 50, true},
+		{"above limit", 60, 50, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := &ContextState{TotalToolCalls: tt.toolCalls}
+			if got := state.NeedsCompactionByToolCount(tt.maxTools); got != tt.wantResult {
+				t.Errorf("NeedsCompactionByToolCount() = %v, want %v", got, tt.wantResult)
+			}
+		})
+	}
+}
+
 func TestGetUtilizationMessage(t *testing.T) {
-	state := &ContextState{}
-	// Currently returns empty string
-	if msg := state.GetUtilizationMessage(); msg != "" {
-		t.Errorf("GetUtilizationMessage() = %v, want empty", msg)
+	t.Run("low utilization returns empty", func(t *testing.T) {
+		state := &ContextState{UtilizationPercent: 0.2}
+		if msg := state.GetUtilizationMessage(); msg != "" {
+			t.Errorf("GetUtilizationMessage() = %v, want empty for low util", msg)
+		}
+	})
+
+	t.Run("moderate utilization returns message", func(t *testing.T) {
+		state := &ContextState{
+			UtilizationPercent: 0.4,
+			TotalTokenEstimate: 80000,
+			TotalToolCalls:     30,
+		}
+		msg := state.GetUtilizationMessage()
+		if msg == "" {
+			t.Error("GetUtilizationMessage() should return message for 40% util")
+		}
+		if !strings.Contains(msg, "moderate") {
+			t.Errorf("Message should contain 'moderate', got: %v", msg)
+		}
+	})
+
+	t.Run("high utilization returns warning", func(t *testing.T) {
+		state := &ContextState{
+			UtilizationPercent: 0.6,
+			TotalTokenEstimate: 120000,
+			TotalToolCalls:     45,
+		}
+		msg := state.GetUtilizationMessage()
+		if !strings.Contains(msg, "high") {
+			t.Errorf("Message should contain 'high', got: %v", msg)
+		}
+	})
+
+	t.Run("critical utilization returns critical warning", func(t *testing.T) {
+		state := &ContextState{
+			UtilizationPercent: 0.75,
+			TotalTokenEstimate: 150000,
+			TotalToolCalls:     55,
+		}
+		msg := state.GetUtilizationMessage()
+		if !strings.Contains(msg, "CRITICAL") {
+			t.Errorf("Message should contain 'CRITICAL', got: %v", msg)
+		}
+	})
+}
+
+func TestReset(t *testing.T) {
+	state := &ContextState{
+		SessionID:          "old-session",
+		TotalTokenEstimate: 100000,
+		TotalToolCalls:     50,
+		EntryCount:         50,
+		ToolCalls: ToolCallsByType{
+			Read: 20,
+			Edit: 10,
+			Bash: 20,
+		},
+		CompactionCount: 2,
+	}
+
+	state.Reset("new-session")
+
+	if state.SessionID != "new-session" {
+		t.Errorf("SessionID = %v, want 'new-session'", state.SessionID)
+	}
+	if state.TotalTokenEstimate != 0 {
+		t.Errorf("TotalTokenEstimate = %v, want 0", state.TotalTokenEstimate)
+	}
+	if state.TotalToolCalls != 0 {
+		t.Errorf("TotalToolCalls = %v, want 0", state.TotalToolCalls)
+	}
+	if state.CompactionCount != 3 {
+		t.Errorf("CompactionCount = %v, want 3 (incremented)", state.CompactionCount)
+	}
+	if state.ToolCalls.Read != 0 {
+		t.Errorf("ToolCalls.Read = %v, want 0", state.ToolCalls.Read)
+	}
+}
+
+func TestGetSummary(t *testing.T) {
+	state := &ContextState{
+		TotalToolCalls:     25,
+		TotalTokenEstimate: 50000,
+		UtilizationPercent: 0.25,
+		ToolCalls: ToolCallsByType{
+			Read:  10,
+			Grep:  5,
+			Glob:  2,
+			Edit:  3,
+			Write: 1,
+			Bash:  3,
+			Task:  1,
+		},
+	}
+
+	summary := state.GetSummary()
+
+	if !strings.Contains(summary, "25") {
+		t.Errorf("Summary should contain tool count '25', got: %v", summary)
+	}
+	if !strings.Contains(summary, "50k") {
+		t.Errorf("Summary should contain '50k' tokens, got: %v", summary)
+	}
+	if !strings.Contains(summary, "25%") {
+		t.Errorf("Summary should contain '25%%' utilization, got: %v", summary)
 	}
 }
 
@@ -186,5 +361,24 @@ func TestContextConstants(t *testing.T) {
 	}
 	if MaxContextTokens != 200000 {
 		t.Errorf("MaxContextTokens = %v, want 200000", MaxContextTokens)
+	}
+}
+
+func TestToolWeights(t *testing.T) {
+	// Verify weights are set for common tools
+	expectedWeights := map[string]int{
+		"Read":  1500,
+		"Grep":  800,
+		"Glob":  300,
+		"Task":  2500,
+		"Edit":  600,
+		"Write": 500,
+		"Bash":  700,
+	}
+
+	for tool, expectedWeight := range expectedWeights {
+		if toolWeights[tool] != expectedWeight {
+			t.Errorf("toolWeights[%s] = %v, want %v", tool, toolWeights[tool], expectedWeight)
+		}
 	}
 }

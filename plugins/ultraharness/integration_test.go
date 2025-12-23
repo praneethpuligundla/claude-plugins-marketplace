@@ -160,19 +160,23 @@ func TestContextTrackingAcrossWorkflow(t *testing.T) {
 		}
 	})
 
-	t.Run("Different session ID resets state", func(t *testing.T) {
+	t.Run("Different session ID persists state", func(t *testing.T) {
 		newSessionID := "new-session-456"
 		ctx, err := context.LoadContextState(newSessionID, workDir)
 		if err != nil {
 			t.Fatalf("LoadContextState error: %v", err)
 		}
 
-		// Should start fresh for new session
+		// Session ID should update but data persists
 		if ctx.SessionID != newSessionID {
 			t.Errorf("New session ID = %v, want %v", ctx.SessionID, newSessionID)
 		}
-		if ctx.EntryCount != 0 {
-			t.Errorf("New session EntryCount = %v, want 0", ctx.EntryCount)
+		// State should persist across sessions (not reset)
+		if ctx.EntryCount != 3 {
+			t.Errorf("EntryCount = %v, want 3 (persisted)", ctx.EntryCount)
+		}
+		if ctx.LastSessionID != sessionID {
+			t.Errorf("LastSessionID = %v, want %v", ctx.LastSessionID, sessionID)
 		}
 	})
 
