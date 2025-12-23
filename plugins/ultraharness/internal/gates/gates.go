@@ -159,3 +159,116 @@ func FormatGateMessage(result *GateResult) string {
 
 	return msg
 }
+
+// GateConfig holds gate-specific configuration options
+type GateConfig struct {
+	WarnOnResearchIncomplete bool
+	WarnOnPlanIncomplete     bool
+	BlockInStrictMode        bool
+}
+
+// DefaultGateConfig returns the default gate configuration
+func DefaultGateConfig() *GateConfig {
+	return &GateConfig{
+		WarnOnResearchIncomplete: true,
+		WarnOnPlanIncomplete:     true,
+		BlockInStrictMode:        true,
+	}
+}
+
+// CheckGateWithConfig checks if an operation is allowed using custom gate config
+func CheckGateWithConfig(gate string, workDir string, strictness string, gateConfig *GateConfig) *GateResult {
+	if gateConfig == nil {
+		gateConfig = DefaultGateConfig()
+	}
+
+	// Relaxed mode: always allow
+	if strictness == "relaxed" {
+		return &GateResult{Action: ActionAllow}
+	}
+
+	// Load FIC state
+	state, err := LoadFICState(workDir)
+	if err != nil {
+		// On error, allow but warn
+		return &GateResult{
+			Action: ActionAllow,
+			Reason: fmt.Sprintf("Could not load FIC state: %v", err),
+		}
+	}
+
+	// Check gate based on phase
+	switch gate {
+	case GateAllowEdit, GateAllowWrite:
+		return checkEditWriteGateWithConfig(state, strictness, gateConfig)
+	case GateAllowBash:
+		return checkBashGate(state, strictness)
+	default:
+		return &GateResult{Action: ActionAllow}
+	}
+}
+
+func checkEditWriteGateWithConfig(state *FICState, strictness string, gateConfig *GateConfig) *GateResult {
+	// If research is not complete, block/warn based on config
+	if !state.ResearchComplete {
+		if !gateConfig.WarnOnResearchIncomplete && strictness != "strict" {
+			return &GateResult{Action: ActionAllow}
+		}
+
+		result := &GateResult{
+			Reason: "Research phase not complete",
+			Suggestions: []string{
+				"Complete research using Read, Grep, Glob, Task tools first",
+				"Use /fic-research-done when research is complete",
+			},
+		}
+		if strictness == "strict" && gateConfig.BlockInStrictMode {
+			result.Action = ActionBlock
+		} else {
+			result.Action = ActionWarn
+		}
+		return result
+	}
+
+	// If plan is not validated, block/warn based on config
+	if !state.PlanValidated {
+		if !gateConfig.WarnOnPlanIncomplete && strictness != "strict" {
+			return &GateResult{Action: ActionAllow}
+		}
+
+		result := &GateResult{
+			Reason: "Planning phase not complete",
+			Suggestions: []string{
+				"Create and validate your implementation plan",
+				"Use /fic-plan-done when plan is validated",
+			},
+		}
+		if strictness == "strict" && gateConfig.BlockInStrictMode {
+			result.Action = ActionBlock
+		} else {
+			result.Action = ActionWarn
+		}
+		return result
+	}
+
+	// All gates passed
+	return &GateResult{Action: ActionAllow}
+}
+
+// SaveFICState saves the FIC state to disk
+func SaveFICState(workDir string, state *FICState) error {
+	stateDir := filepath.Join(workDir, ".claude")
+	if err := os.MkdirAll(stateDir, 0700); err != nil {
+		return err
+	}
+
+	state.LastUpdated = time.Now()
+
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	statePath := filepath.Join(stateDir, FICStateFileName)
+	return os.WriteFile(statePath, data, 0600)
+}

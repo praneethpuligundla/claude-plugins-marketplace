@@ -307,3 +307,191 @@ func TestConfigConstants(t *testing.T) {
 		t.Errorf("StrictnessStrict = %v, want 'strict'", StrictnessStrict)
 	}
 }
+
+func TestGetResearchConfidenceThreshold(t *testing.T) {
+	tests := []struct {
+		name      string
+		cfg       *Config
+		wantValue float64
+	}{
+		{
+			name:      "nil FICConfig uses default",
+			cfg:       &Config{FICConfig: nil},
+			wantValue: 0.70,
+		},
+		{
+			name:      "zero threshold uses default",
+			cfg:       &Config{FICConfig: &FICConfig{ResearchConfidenceThreshold: 0}},
+			wantValue: 0.70,
+		},
+		{
+			name:      "custom threshold",
+			cfg:       &Config{FICConfig: &FICConfig{ResearchConfidenceThreshold: 0.85}},
+			wantValue: 0.85,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cfg.GetResearchConfidenceThreshold(); got != tt.wantValue {
+				t.Errorf("GetResearchConfidenceThreshold() = %v, want %v", got, tt.wantValue)
+			}
+		})
+	}
+}
+
+func TestGetMaxOpenQuestions(t *testing.T) {
+	tests := []struct {
+		name      string
+		cfg       *Config
+		wantValue int
+	}{
+		{
+			name:      "nil FICConfig uses default",
+			cfg:       &Config{FICConfig: nil},
+			wantValue: 2,
+		},
+		{
+			name:      "zero uses default",
+			cfg:       &Config{FICConfig: &FICConfig{MaxOpenQuestions: 0}},
+			wantValue: 2,
+		},
+		{
+			name:      "custom value",
+			cfg:       &Config{FICConfig: &FICConfig{MaxOpenQuestions: 5}},
+			wantValue: 5,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cfg.GetMaxOpenQuestions(); got != tt.wantValue {
+				t.Errorf("GetMaxOpenQuestions() = %v, want %v", got, tt.wantValue)
+			}
+		})
+	}
+}
+
+func TestGateBehaviorGetters(t *testing.T) {
+	t.Run("nil FICConfig returns defaults", func(t *testing.T) {
+		cfg := &Config{FICConfig: nil}
+		if !cfg.ShouldWarnOnResearchIncomplete() {
+			t.Error("ShouldWarnOnResearchIncomplete() should default to true")
+		}
+		if !cfg.ShouldWarnOnPlanIncomplete() {
+			t.Error("ShouldWarnOnPlanIncomplete() should default to true")
+		}
+		if !cfg.ShouldBlockInStrictMode() {
+			t.Error("ShouldBlockInStrictMode() should default to true")
+		}
+	})
+
+	t.Run("respects configured values", func(t *testing.T) {
+		cfg := &Config{
+			FICConfig: &FICConfig{
+				WarnOnResearchIncomplete: false,
+				WarnOnPlanIncomplete:     false,
+				BlockInStrictMode:        false,
+			},
+		}
+		if cfg.ShouldWarnOnResearchIncomplete() {
+			t.Error("ShouldWarnOnResearchIncomplete() should be false")
+		}
+		if cfg.ShouldWarnOnPlanIncomplete() {
+			t.Error("ShouldWarnOnPlanIncomplete() should be false")
+		}
+		if cfg.ShouldBlockInStrictMode() {
+			t.Error("ShouldBlockInStrictMode() should be false")
+		}
+	})
+}
+
+func TestSaveConfig(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "config-save-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := DefaultConfig()
+	cfg.Strictness = StrictnessStrict
+	cfg.FICConfig.ResearchConfidenceThreshold = 0.85
+
+	err = cfg.Save(tmpDir)
+	if err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	// Load and verify
+	loaded, err := Load(tmpDir)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if loaded.Strictness != StrictnessStrict {
+		t.Errorf("Strictness = %v, want %v", loaded.Strictness, StrictnessStrict)
+	}
+	if loaded.GetResearchConfidenceThreshold() != 0.85 {
+		t.Errorf("ResearchConfidenceThreshold = %v, want 0.85", loaded.GetResearchConfidenceThreshold())
+	}
+}
+
+func TestSetStrictness(t *testing.T) {
+	cfg := DefaultConfig()
+
+	cfg.SetStrictness("strict")
+	if cfg.Strictness != StrictnessStrict {
+		t.Errorf("SetStrictness(strict) = %v, want %v", cfg.Strictness, StrictnessStrict)
+	}
+
+	cfg.SetStrictness("relaxed")
+	if cfg.Strictness != StrictnessRelaxed {
+		t.Errorf("SetStrictness(relaxed) = %v, want %v", cfg.Strictness, StrictnessRelaxed)
+	}
+
+	cfg.SetStrictness("invalid")
+	if cfg.Strictness != StrictnessStandard {
+		t.Errorf("SetStrictness(invalid) = %v, want %v", cfg.Strictness, StrictnessStandard)
+	}
+}
+
+func TestSetResearchConfidenceThreshold(t *testing.T) {
+	cfg := &Config{}
+	cfg.SetResearchConfidenceThreshold(0.90)
+
+	if cfg.FICConfig == nil {
+		t.Fatal("FICConfig should not be nil after SetResearchConfidenceThreshold")
+	}
+	if cfg.FICConfig.ResearchConfidenceThreshold != 0.90 {
+		t.Errorf("ResearchConfidenceThreshold = %v, want 0.90", cfg.FICConfig.ResearchConfidenceThreshold)
+	}
+
+	// Invalid values should be ignored
+	cfg.SetResearchConfidenceThreshold(1.5) // > 1.0
+	if cfg.FICConfig.ResearchConfidenceThreshold != 0.90 {
+		t.Error("Invalid threshold > 1.0 should be ignored")
+	}
+
+	cfg.SetResearchConfidenceThreshold(-0.5) // < 0
+	if cfg.FICConfig.ResearchConfidenceThreshold != 0.90 {
+		t.Error("Invalid threshold < 0 should be ignored")
+	}
+}
+
+func TestSetMaxOpenQuestions(t *testing.T) {
+	cfg := &Config{}
+	cfg.SetMaxOpenQuestions(5)
+
+	if cfg.FICConfig == nil {
+		t.Fatal("FICConfig should not be nil after SetMaxOpenQuestions")
+	}
+	if cfg.FICConfig.MaxOpenQuestions != 5 {
+		t.Errorf("MaxOpenQuestions = %v, want 5", cfg.FICConfig.MaxOpenQuestions)
+	}
+
+	// Negative values should be ignored
+	cfg.SetMaxOpenQuestions(-1)
+	if cfg.FICConfig.MaxOpenQuestions != 5 {
+		t.Error("Negative MaxOpenQuestions should be ignored")
+	}
+}

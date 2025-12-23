@@ -51,6 +51,58 @@ claude plugins:add praneethpuligundla/ultraharness
 
 Existing `claude-progress.txt` and `claude-features.json` files are preserved - UltraHarness adds FIC artifacts alongside them.
 
+## Quick Start
+
+Here's a real-world example of using UltraHarness for a feature implementation:
+
+```
+# 1. Start a new Claude Code session - harness auto-initializes
+$ claude
+
+# 2. Check your current status
+> /ultraharness:status
+FIC Phase: NEW_SESSION
+Mode: standard
+
+# 3. Start with research (Claude will auto-suggest delegation)
+> How does the authentication system work?
+[Harness suggests: Consider delegating to @fic-researcher for exploration]
+
+# 4. Use the researcher subagent to keep main context clean
+> @fic-researcher explore the auth system
+
+# 5. Once research is complete, Claude transitions to planning phase
+> Create a plan to add OAuth support
+[FIC Gate: Research confidence at 75%, proceeding to planning]
+
+# 6. Plan gets validated, then implement
+> Implement the OAuth integration
+[FIC Gate: Plan validated, proceeding to implementation]
+
+# 7. When done, commit your work
+> /commit
+[Checkpoint created - safe recovery point]
+```
+
+### Example: Feature Development Flow
+
+```
+Session 1: Research
+├── Explore codebase with subagent
+├── Build 70%+ confidence
+└── Document findings in ResearchArtifact
+
+Session 2: Planning
+├── Create implementation plan
+├── Validate with @fic-plan-validator
+└── Get PROCEED recommendation
+
+Session 3: Implementation
+├── Execute plan step by step
+├── Run tests after each change
+└── Commit frequently for checkpoints
+```
+
 ## Usage
 
 ### Automatic Initialization
@@ -308,7 +360,8 @@ ultraharness/
 │   ├── run-hook              # Platform auto-detection wrapper
 │   ├── darwin-arm64/         # Apple Silicon
 │   ├── darwin-amd64/         # Intel Mac
-│   └── linux-amd64/          # Linux
+│   ├── linux-amd64/          # Linux
+│   └── windows-amd64/        # Windows (*.exe)
 ├── hooks/                    # Python fallbacks + config
 │   ├── hooks.json            # Hook definitions
 │   └── *.py                  # Python implementations
@@ -336,3 +389,94 @@ Build for all platforms:
 make all    # Builds darwin-arm64, darwin-amd64, linux-amd64
 make test   # Run tests
 ```
+
+## Troubleshooting
+
+### Plugin not loading
+
+**Symptom:** Hooks don't run, no FIC messages appear.
+
+```bash
+# Check if plugin is installed and enabled
+claude plugins list
+
+# Reinstall if needed
+claude plugins:remove ultraharness
+claude plugins:add praneethpuligundla/ultraharness
+```
+
+### Gates blocking unexpectedly
+
+**Symptom:** "Research phase not complete" when you want to edit.
+
+```bash
+# Check current FIC state
+/ultraharness:status
+
+# Switch to relaxed mode to bypass gates temporarily
+/ultraharness:configure relaxed
+
+# Or force initialization to reset state
+rm -rf .claude/fic-*
+/ultraharness:init
+```
+
+### Go binary not executing
+
+**Symptom:** "Hook not found" or Python fallback executing.
+
+```bash
+# Check if binaries exist
+ls -la ~/.claude/plugins/marketplaces/*/plugins/ultraharness/bin/
+
+# Verify binary is executable
+file ~/.claude/plugins/marketplaces/*/plugins/ultraharness/bin/darwin-arm64/session_start
+# Should output: Mach-O 64-bit executable arm64
+
+# Test hook manually
+~/.claude/plugins/marketplaces/*/plugins/ultraharness/bin/run-hook session_start < /dev/null
+```
+
+### Progress file not updating
+
+**Symptom:** `claude-progress.txt` stays empty.
+
+```bash
+# Check file permissions
+ls -la claude-progress.txt
+
+# Ensure harness is initialized
+cat .claude/.claude-harness-initialized
+
+# Manually test progress append
+echo "[$(date)] TEST: Manual entry" >> claude-progress.txt
+```
+
+### Context not preserved across sessions
+
+**Symptom:** New sessions start without prior context.
+
+```bash
+# Check preserved context file
+cat .claude/fic-preserved-context.json
+
+# Ensure PreCompact hook ran before session ended
+grep "PreCompact" claude-progress.txt
+```
+
+## FAQ
+
+**Q: Can I use this with the lightweight `harness` plugin?**
+No, use one or the other. UltraHarness includes all harness features plus FIC.
+
+**Q: How do I reset the FIC state?**
+Delete `.claude/fic-*.json` files and run `/ultraharness:init`.
+
+**Q: Can I customize the research confidence threshold?**
+Yes, edit `.claude/claude-harness.json` and set `fic_config.research_confidence_threshold`.
+
+**Q: Why use Go binaries instead of Python?**
+Performance. Go hooks execute in ~10ms vs ~200ms for Python, reducing latency on every tool call.
+
+**Q: Does this work on Windows?**
+Yes! Windows amd64 binaries are included. Use Git Bash, WSL, or MSYS2 to run the `run-hook` wrapper script. The script auto-detects Windows environments (MINGW/CYGWIN/MSYS) and uses the `.exe` binaries.

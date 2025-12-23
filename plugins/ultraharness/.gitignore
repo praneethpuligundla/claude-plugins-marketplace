@@ -27,6 +27,9 @@ Thumbs.db
 *.dylib
 firebase-debug.log
 
+# Track Windows distribution binaries (exception to *.exe above)
+!bin/windows-amd64/*.exe
+
 # Ultraharness local files
 claude-progress.txt
 .claude/fic-*.json

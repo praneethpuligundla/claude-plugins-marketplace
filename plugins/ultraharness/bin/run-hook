@@ -5,15 +5,25 @@ HOOK_NAME="$1"
 shift 2>/dev/null || true
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PLUGIN_ROOT="$(dirname "$SCRIPT_DIR")"
-OS="$(uname -s | tr "[:upper:]" "[:lower:]")"
+OS_RAW="$(uname -s)"
 ARCH="$(uname -m)"
+case "$OS_RAW" in
+    Darwin) OS="darwin" ;;
+    Linux) OS="linux" ;;
+    MINGW*|CYGWIN*|MSYS*) OS="windows" ;;
+    *) exec python3 "${PLUGIN_ROOT}/hooks/${HOOK_NAME}.py" "$@" ;;
+esac
 case "$ARCH" in
     x86_64|amd64) ARCH="amd64" ;;
     arm64|aarch64) ARCH="arm64" ;;
     *) exec python3 "${PLUGIN_ROOT}/hooks/${HOOK_NAME}.py" "$@" ;;
 esac
 PLATFORM="${OS}-${ARCH}"
-GO_BINARY="${SCRIPT_DIR}/${PLATFORM}/${HOOK_NAME}"
+if [ "$OS" = "windows" ]; then
+    GO_BINARY="${SCRIPT_DIR}/${PLATFORM}/${HOOK_NAME}.exe"
+else
+    GO_BINARY="${SCRIPT_DIR}/${PLATFORM}/${HOOK_NAME}"
+fi
 if [ -x "$GO_BINARY" ]; then
     exec "$GO_BINARY" "$@"
 else
