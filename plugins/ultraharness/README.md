@@ -268,8 +268,34 @@ The FIC system implements intelligent context management for complex, long-runni
 
 - **Information Classification** - Essential / Helpful / Noise
 - **Redundancy Detection** - Alerts when re-reading same content
+- **Weighted Tool Tracking** - Tracks tool calls by type with weighted token estimates
 - **Utilization Tracking** - Target 40-60% context utilization
+- **Auto-Compaction** - Automatically triggers `/compact` when thresholds are hit
 - **Compaction Preservation** - Essential context preserved across sessions
+
+### Auto-Compaction
+
+When context fills up, the harness automatically triggers compaction:
+
+| Metric | Warning | Critical (Auto-Compact) |
+|--------|---------|------------------------|
+| Tool Calls | 33+ calls | 50+ calls |
+| Utilization | 50%+ | 70%+ |
+
+At critical threshold, the harness outputs:
+```
+[FIC] AUTO-COMPACTION TRIGGERED
+MANDATORY: You MUST run /compact NOW before doing anything else.
+```
+
+To disable auto-compaction, set in config:
+```json
+{
+  "fic_config": {
+    "auto_compact_enabled": false
+  }
+}
+```
 
 ### Verification Gates
 
@@ -296,7 +322,8 @@ Configure FIC in `.claude/claude-harness.json`:
     "target_utilization_high": 0.60,
     "research_confidence_threshold": 0.7,
     "max_open_questions": 2,
-    "compaction_tool_threshold": 25
+    "compaction_tool_threshold": 50,
+    "auto_compact_enabled": true
   }
 }
 ```
