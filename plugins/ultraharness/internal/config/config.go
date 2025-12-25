@@ -56,6 +56,11 @@ type FICConfig struct {
 	WarnOnResearchIncomplete bool `json:"warn_on_research_incomplete"`
 	WarnOnPlanIncomplete     bool `json:"warn_on_plan_incomplete"`
 	BlockInStrictMode        bool `json:"block_in_strict_mode"`
+
+	// Parallel implementation settings
+	ParallelImplementationEnabled bool `json:"parallel_implementation_enabled"`
+	MaxParallelAgents             int  `json:"max_parallel_agents"`
+	MinStepsForParallel           int  `json:"min_steps_for_parallel"`
 }
 
 // DefaultConfig returns the default configuration
@@ -79,9 +84,12 @@ func DefaultConfig() *Config {
 			AutoCompactEnabled:          true,
 			ResearchConfidenceThreshold: 0.70,
 			MaxOpenQuestions:            2,
-			WarnOnResearchIncomplete:    true,
-			WarnOnPlanIncomplete:        true,
-			BlockInStrictMode:           true,
+			WarnOnResearchIncomplete:      true,
+			WarnOnPlanIncomplete:          true,
+			BlockInStrictMode:             true,
+			ParallelImplementationEnabled: true,
+			MaxParallelAgents:             3,
+			MinStepsForParallel:           3,
 		},
 	}
 }

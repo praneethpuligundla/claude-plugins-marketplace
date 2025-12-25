@@ -324,10 +324,92 @@ Configure FIC in `.claude/claude-harness.json`:
     "research_confidence_threshold": 0.7,
     "max_open_questions": 2,
     "compaction_tool_threshold": 50,
-    "auto_compact_enabled": true
+    "auto_compact_enabled": true,
+    "parallel_implementation_enabled": true,
+    "max_parallel_agents": 3,
+    "min_steps_for_parallel": 3
   }
 }
 ```
+
+## Parallel Implementation
+
+For large features, the harness can orchestrate multiple implementation agents working in parallel.
+
+### How It Works
+
+```
+Validated Plan (with parallel batches)
+              ↓
+┌──────────────────────────────────────┐
+│  Main Agent (Orchestrator)           │
+│  - Parses parallel batches           │
+│  - Assigns file scopes               │
+│  - Spawns agents in parallel         │
+└──────────────────────────────────────┘
+              ↓
+┌─────────────┬─────────────┬─────────────┐
+│ implementer │ implementer │ implementer │
+│ scope: api  │ scope: ui   │ scope: svc  │
+└─────────────┴─────────────┴─────────────┘
+              ↓
+┌──────────────────────────────────────┐
+│  Main Agent                          │
+│  - Reviews all outputs               │
+│  - Resolves conflicts                │
+│  - Runs tests, commits               │
+└──────────────────────────────────────┘
+```
+
+### Agents
+
+| Agent | Role |
+|-------|------|
+| `fic-researcher` | Explores codebase, returns structured findings |
+| `fic-plan-validator` | Validates plans, identifies parallel batches |
+| `fic-implementer` | Scoped implementation worker |
+
+### When Parallel Is Used
+
+The plan validator recommends parallelization when:
+- Plan has 3+ independent steps
+- Steps modify different files/modules
+- No circular dependencies
+- Clear scope boundaries exist
+
+### Configuration
+
+```json
+{
+  "fic_config": {
+    "parallel_implementation_enabled": true,
+    "max_parallel_agents": 3,
+    "min_steps_for_parallel": 3
+  }
+}
+```
+
+### Using Parallel Implementation
+
+1. Create and validate your plan
+2. Plan validator outputs `Parallel Execution Plan` with batches
+3. Run `/ultraharness:parallel-implement` to orchestrate
+4. Main agent spawns implementer agents for each batch
+5. Review outputs, resolve conflicts, run tests, commit
+
+### Example Parallel Batch
+
+From plan validator:
+```
+#### Batch 1 (parallel)
+| Task | Scope | Dependencies |
+|------|-------|--------------|
+| Add user API | src/api/user* | None |
+| Add user UI | src/components/User* | None |
+| Add user service | src/services/user* | None |
+```
+
+Main agent spawns 3 `fic-implementer` agents with these scopes, waits for completion, then merges results.
 
 ## Best Practices
 

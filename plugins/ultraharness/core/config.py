@@ -64,7 +64,10 @@ DEFAULT_CONFIG = {
             "explore", "investigate", "what is", "explain the"
         ],
         "preserve_essential_on_compact": True,
-        "auto_create_artifacts": True
+        "auto_create_artifacts": True,
+        "parallel_implementation_enabled": True,
+        "max_parallel_agents": 3,
+        "min_steps_for_parallel": 3
     }
 }
 
