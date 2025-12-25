@@ -72,7 +72,7 @@ func DefaultConfig() *Config {
 		InitScriptExecution:      true,
 		BaselineTestsOnStartup:   true,
 		FICConfig: &FICConfig{
-			AutoCompactThreshold:        0.70,
+			AutoCompactThreshold:        0.85,
 			CompactionToolThreshold:     50,
 			TargetUtilizationHigh:       0.60,
 			TargetUtilizationLow:        0.40,
@@ -142,7 +142,7 @@ func (c *Config) GetAutoCompactThreshold() float64 {
 	if c.FICConfig != nil && c.FICConfig.AutoCompactThreshold > 0 {
 		return c.FICConfig.AutoCompactThreshold
 	}
-	return 0.70
+	return 0.85
 }
 
 // GetCompactionToolThreshold returns the compaction tool threshold

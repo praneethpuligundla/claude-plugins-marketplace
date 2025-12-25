@@ -38,8 +38,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.FICConfig == nil {
 		t.Fatal("FICConfig should not be nil")
 	}
-	if cfg.FICConfig.AutoCompactThreshold != 0.70 {
-		t.Errorf("AutoCompactThreshold = %f, want 0.70", cfg.FICConfig.AutoCompactThreshold)
+	if cfg.FICConfig.AutoCompactThreshold != 0.85 {
+		t.Errorf("AutoCompactThreshold = %f, want 0.85", cfg.FICConfig.AutoCompactThreshold)
 	}
 	if cfg.FICConfig.CompactionToolThreshold != 50 {
 		t.Errorf("CompactionToolThreshold = %d, want 50", cfg.FICConfig.CompactionToolThreshold)
@@ -113,12 +113,12 @@ func TestGetAutoCompactThreshold(t *testing.T) {
 		{
 			name:      "nil FICConfig uses default",
 			cfg:       &Config{FICConfig: nil},
-			wantValue: 0.70,
+			wantValue: 0.85,
 		},
 		{
 			name:      "zero threshold uses default",
 			cfg:       &Config{FICConfig: &FICConfig{AutoCompactThreshold: 0}},
-			wantValue: 0.70,
+			wantValue: 0.85,
 		},
 		{
 			name:      "custom threshold",

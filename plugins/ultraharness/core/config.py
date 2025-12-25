@@ -55,7 +55,7 @@ DEFAULT_CONFIG = {
     "fic_config": {
         "target_utilization_low": 0.40,
         "target_utilization_high": 0.60,
-        "auto_compact_threshold": 0.70,  # Triggers /compact when exceeded
+        "auto_compact_threshold": 0.85,  # Triggers /compact when exceeded
         "research_confidence_threshold": 0.7,  # Min confidence to proceed to planning
         "max_open_questions": 2,  # Max open questions to proceed
         "compaction_tool_threshold": 25,  # Tool calls before suggesting compaction

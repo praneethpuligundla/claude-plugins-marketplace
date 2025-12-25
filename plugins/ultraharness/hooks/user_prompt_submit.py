@@ -52,7 +52,7 @@ except ImportError:
         return ""
 
 # Default auto-compaction threshold (can be overridden in config)
-DEFAULT_AUTO_COMPACT_THRESHOLD = 0.70  # 70% context utilization
+DEFAULT_AUTO_COMPACT_THRESHOLD = 0.85  # 85% context utilization
 
 
 # Research-triggering patterns

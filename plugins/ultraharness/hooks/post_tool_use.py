@@ -79,7 +79,7 @@ except ImportError:
 
 
 # Default auto-compaction threshold
-DEFAULT_AUTO_COMPACT_THRESHOLD = 0.70
+DEFAULT_AUTO_COMPACT_THRESHOLD = 0.85
 
 
 def build_compaction_directive(utilization: float, token_estimate: int, threshold: float) -> str:
