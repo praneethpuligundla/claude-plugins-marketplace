@@ -143,14 +143,21 @@ func trackContext(input *protocol.HookInput, workDir string, cfg *config.Config)
 	if compactionToolThreshold == 0 {
 		compactionToolThreshold = DefaultToolCountCritical
 	}
+	autoCompactEnabled := cfg.IsAutoCompactEnabled()
 
 	// Check for CRITICAL: auto-compaction needed (token-based)
 	if state.NeedsCompaction(autoCompactThreshold) {
+		if autoCompactEnabled {
+			return buildAutoCompactDirective(state, "utilization", autoCompactThreshold)
+		}
 		return buildCompactionDirective(state, autoCompactThreshold)
 	}
 
 	// Check for CRITICAL: tool count exceeded
 	if state.NeedsCompactionByToolCount(compactionToolThreshold) {
+		if autoCompactEnabled {
+			return buildAutoCompactDirective(state, "tool_count", float64(compactionToolThreshold))
+		}
 		return buildToolCountDirective(state, compactionToolThreshold)
 	}
 
@@ -166,6 +173,40 @@ func trackContext(input *protocol.HookInput, workDir string, cfg *config.Config)
 	}
 
 	return ""
+}
+
+func buildAutoCompactDirective(state *context.ContextState, reason string, threshold float64) string {
+	var triggerInfo string
+	if reason == "utilization" {
+		triggerInfo = fmt.Sprintf("Context utilization: %.0f%% (threshold: %.0f%%)", state.UtilizationPercent*100, threshold*100)
+	} else {
+		triggerInfo = fmt.Sprintf("Tool calls: %d (threshold: %.0f)", state.TotalToolCalls, threshold)
+	}
+
+	return fmt.Sprintf(`
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  [FIC] AUTO-COMPACTION TRIGGERED                                             ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║                                                                              ║
+║  %s
+║  %s
+║                                                                              ║
+║  Compactions so far: %d
+║                                                                              ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+MANDATORY: You MUST run /compact NOW before doing anything else.
+
+This is an automated compaction trigger. The context window is filling up.
+Running /compact will:
+1. Preserve essential context (phase, discoveries, progress)
+2. Reset the context window for continued work
+3. Maintain your current focus and task
+
+Execute: /compact`,
+		triggerInfo,
+		state.GetSummary(),
+		state.CompactionCount)
 }
 
 func buildCompactionDirective(state *context.ContextState, threshold float64) string {

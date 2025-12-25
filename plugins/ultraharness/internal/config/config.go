@@ -45,6 +45,9 @@ type FICConfig struct {
 	TargetUtilizationHigh   float64 `json:"target_utilization_high"`
 	TargetUtilizationLow    float64 `json:"target_utilization_low"`
 
+	// Auto-compaction behavior
+	AutoCompactEnabled bool `json:"auto_compact_enabled"`
+
 	// Research phase thresholds
 	ResearchConfidenceThreshold float64 `json:"research_confidence_threshold"`
 	MaxOpenQuestions            int     `json:"max_open_questions"`
@@ -70,9 +73,10 @@ func DefaultConfig() *Config {
 		BaselineTestsOnStartup:   true,
 		FICConfig: &FICConfig{
 			AutoCompactThreshold:        0.70,
-			CompactionToolThreshold:     25,
+			CompactionToolThreshold:     50,
 			TargetUtilizationHigh:       0.60,
 			TargetUtilizationLow:        0.40,
+			AutoCompactEnabled:          true,
 			ResearchConfidenceThreshold: 0.70,
 			MaxOpenQuestions:            2,
 			WarnOnResearchIncomplete:    true,
@@ -146,7 +150,7 @@ func (c *Config) GetCompactionToolThreshold() int {
 	if c.FICConfig != nil && c.FICConfig.CompactionToolThreshold > 0 {
 		return c.FICConfig.CompactionToolThreshold
 	}
-	return 25
+	return 50
 }
 
 // GetResearchConfidenceThreshold returns the research confidence threshold
@@ -163,6 +167,14 @@ func (c *Config) GetMaxOpenQuestions() int {
 		return c.FICConfig.MaxOpenQuestions
 	}
 	return 2
+}
+
+// IsAutoCompactEnabled returns whether auto-compaction is enabled
+func (c *Config) IsAutoCompactEnabled() bool {
+	if c.FICConfig != nil {
+		return c.FICConfig.AutoCompactEnabled
+	}
+	return true // Enabled by default
 }
 
 // ShouldWarnOnResearchIncomplete returns whether to warn when research is incomplete

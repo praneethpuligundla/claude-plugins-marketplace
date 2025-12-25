@@ -89,7 +89,7 @@ func run() error {
 		details = map[string]interface{}{}
 	}
 
-	// Load context state for additional info
+	// Load context state for additional info, then reset for next session
 	var tokenEstimate int
 	var utilization float64
 	if cfg.FICContextTracking {
@@ -97,8 +97,14 @@ func run() error {
 		if err == nil && state != nil {
 			tokenEstimate = state.TotalTokenEstimate
 			utilization = state.UtilizationPercent
-			messages = append(messages, fmt.Sprintf("[FIC] Context state: %.0f%% utilization, %d tokens estimated",
-				utilization*100, tokenEstimate))
+			messages = append(messages, fmt.Sprintf("[FIC] Context state: %.0f%% utilization, %d tokens estimated, %d compactions",
+				utilization*100, tokenEstimate, state.CompactionCount))
+
+			// Reset context state for fresh start after compaction
+			state.Reset(sessionID)
+			if err := state.Save(workDir); err == nil {
+				messages = append(messages, "[FIC] Context tracking reset for fresh start.")
+			}
 		}
 	}
 
