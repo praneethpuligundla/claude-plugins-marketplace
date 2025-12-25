@@ -280,7 +280,7 @@ When context fills up, the harness automatically triggers compaction:
 | Metric | Warning | Critical (Auto-Compact) |
 |--------|---------|------------------------|
 | Tool Calls | 33+ calls | 50+ calls |
-| Utilization | 50%+ | 70%+ |
+| Utilization | 60%+ | 85%+ |
 
 At critical threshold, the harness outputs:
 ```
@@ -318,6 +318,7 @@ Configure FIC in `.claude/claude-harness.json`:
   "fic_auto_delegate_research": true,
   "fic_context_tracking": true,
   "fic_config": {
+    "auto_compact_threshold": 0.85,
     "target_utilization_low": 0.40,
     "target_utilization_high": 0.60,
     "research_confidence_threshold": 0.7,
