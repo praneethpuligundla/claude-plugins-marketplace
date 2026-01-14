@@ -78,6 +78,24 @@ Shows git status, recent progress, and feature summary.
 /harness:checkpoint [message]
 ```
 
+### Run Baseline Tests
+
+```
+/harness:baseline
+```
+
+Runs the test suite and displays results. Supports Node.js, Python, Go, Rust, and Java projects.
+
+### Configure Harness
+
+```
+/harness:configure strict    # Maximum enforcement - blocks stopping if tests fail
+/harness:configure standard  # Balanced automation (default)
+/harness:configure relaxed   # Minimal intervention - suggestions only
+```
+
+Configure strictness levels and automation settings like auto-logging, checkpoint intervals, and feature enforcement.
+
 ## How It Works
 
 ### Session Start Hook
@@ -123,17 +141,25 @@ harness/
 ├── hooks/
 │   ├── hooks.json
 │   ├── session_start.py
+│   ├── pre_tool_use.py
+│   ├── post_tool_use.py
 │   └── stop.py
 ├── commands/
 │   ├── init.md
 │   ├── status.md
-│   ├── log.md
 │   ├── feature.md
-│   └── checkpoint.md
+│   ├── log.md
+│   ├── checkpoint.md
+│   ├── baseline.md
+│   └── configure.md
 ├── skills/
 │   └── harness-workflow.md
 ├── core/
 │   ├── progress.py
-│   └── features.py
+│   ├── features.py
+│   ├── config.py
+│   ├── test_runner.py
+│   ├── change_detector.py
+│   └── browser_automation.py
 └── README.md
 ```

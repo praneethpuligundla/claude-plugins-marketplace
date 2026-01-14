@@ -17,6 +17,19 @@ Basic tooling for long-running agent workflows:
 - Feature checklists (`claude-features.json`)
 - Git checkpoints
 - Session startup context
+- Baseline test runner
+- Configurable strictness levels
+
+**Commands:**
+| Command | Description |
+|---------|-------------|
+| `/harness:init` | Initialize harness for a project |
+| `/harness:status` | Show git status, progress, and feature summary |
+| `/harness:feature` | Manage feature checklist (add, pass, fail, list) |
+| `/harness:log` | Add entries to progress log |
+| `/harness:checkpoint` | Create a git checkpoint commit |
+| `/harness:baseline` | Run baseline tests |
+| `/harness:configure` | Configure strictness and automation settings |
 
 ### ultraharness (Full FIC)
 Everything in harness PLUS:
@@ -25,6 +38,24 @@ Everything in harness PLUS:
 - **Artifact Workflow** - Research → Plan → Implementation with structured artifacts
 - **Verification Gates** - Blocks progression until quality thresholds met
 - **Context Preservation** - Preserves essential context across sessions
+- **Parallel Implementation** - Orchestrates multiple agents for large features
+- **Zero Configuration** - Auto-initializes on first session
+
+**Commands:**
+| Command | Description |
+|---------|-------------|
+| `/ultraharness:init` | Initialize harness (optional - auto-initializes) |
+| `/ultraharness:status` | Show FIC phase, confidence, and git state |
+| `/ultraharness:configure` | Configure FIC mode (strict/standard/relaxed) |
+| `/ultraharness:baseline` | Run baseline tests |
+| `/ultraharness:parallel-implement` | Orchestrate parallel implementation agents |
+
+**Subagents:**
+| Agent | Role |
+|-------|------|
+| `fic-researcher` | Explores codebase, returns structured findings |
+| `fic-plan-validator` | Validates plans, identifies parallel batches |
+| `fic-implementer` | Scoped implementation worker |
 
 ## Installation
 
