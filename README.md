@@ -38,7 +38,7 @@ Everything in harness PLUS:
 - **Artifact Workflow** - Research → Plan → Implementation with structured artifacts
 - **Verification Gates** - Blocks progression until quality thresholds met
 - **Context Preservation** - Preserves essential context across sessions
-- **Parallel Implementation** - Orchestrates multiple agents for large features
+- **Parallel Implementation** - Auto-triggers parallel agents for large features
 - **Zero Configuration** - Auto-initializes on first session
 
 **Commands:**
@@ -48,14 +48,13 @@ Everything in harness PLUS:
 | `/ultraharness:status` | Show FIC phase, confidence, and git state |
 | `/ultraharness:configure` | Configure FIC mode (strict/standard/relaxed) |
 | `/ultraharness:baseline` | Run baseline tests |
-| `/ultraharness:parallel-implement` | Orchestrate parallel implementation agents |
 
 **Subagents:**
 | Agent | Role |
 |-------|------|
 | `fic-researcher` | Explores codebase, returns structured findings |
-| `fic-plan-validator` | Validates plans, identifies parallel batches |
-| `fic-implementer` | Scoped implementation worker |
+| `fic-plan-validator` | Validates plans, triggers parallel implementation if applicable |
+| `fic-implementer` | Scoped implementation worker (auto-spawned) |
 
 ## Installation
 

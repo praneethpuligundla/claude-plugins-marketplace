@@ -181,6 +181,89 @@ def extract_recommendation(output: str) -> str:
     return 'UNKNOWN'
 
 
+def extract_parallel_batches(output: str) -> list:
+    """Extract parallel execution batches from plan validator output."""
+    batches = []
+
+    # Look for batch sections like "#### Batch 1 (parallel)"
+    batch_pattern = r'#{2,4}\s*Batch\s+(\d+)\s*\(parallel\)(.*?)(?=#{2,4}\s*Batch|\Z)'
+    matches = re.finditer(batch_pattern, output, re.IGNORECASE | re.DOTALL)
+
+    for match in matches:
+        batch_num = int(match.group(1))
+        batch_content = match.group(2)
+
+        # Extract tasks from table format
+        # | Task | Scope | Dependencies |
+        task_pattern = r'\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|\s*([^|]*)\s*\|'
+        task_matches = re.finditer(task_pattern, batch_content)
+
+        tasks = []
+        for task_match in task_matches:
+            task_name = task_match.group(1).strip()
+            scope = task_match.group(2).strip()
+            deps = task_match.group(3).strip()
+
+            # Skip header row
+            if task_name.lower() in ['task', '---', '------']:
+                continue
+
+            tasks.append({
+                'task': task_name,
+                'scope': scope,
+                'dependencies': deps
+            })
+
+        if tasks:
+            batches.append({
+                'batch': batch_num,
+                'tasks': tasks
+            })
+
+    return batches
+
+
+def format_parallel_instructions(batches: list) -> str:
+    """Format instructions for spawning parallel implementer agents."""
+    if not batches:
+        return ""
+
+    lines = []
+    lines.append("")
+    lines.append("=" * 50)
+    lines.append("PARALLEL IMPLEMENTATION - AUTO-TRIGGERED")
+    lines.append("=" * 50)
+    lines.append("")
+    lines.append("Plan validated with parallelization. Execute these batches:")
+    lines.append("")
+
+    for batch in batches:
+        lines.append(f"### Batch {batch['batch']}")
+        lines.append("")
+        lines.append("Spawn these agents IN PARALLEL (single message, multiple Task calls):")
+        lines.append("")
+
+        for i, task in enumerate(batch['tasks'], 1):
+            lines.append(f"**Agent {i}:**")
+            lines.append("```")
+            lines.append(f"Task tool with subagent_type: ultraharness:fic-implementer")
+            lines.append(f"prompt: |")
+            lines.append(f"  Task: {task['task']}")
+            lines.append(f"  Scope: {task['scope']}")
+            lines.append(f"  Dependencies: {task['dependencies'] or 'None'}")
+            lines.append("```")
+            lines.append("")
+
+    lines.append("IMPORTANT: Spawn all agents in a batch with ONE message containing")
+    lines.append("multiple Task tool calls to ensure parallel execution.")
+    lines.append("")
+    lines.append("After each batch completes, review results and resolve conflicts")
+    lines.append("before proceeding to the next batch.")
+    lines.append("=" * 50)
+
+    return '\n'.join(lines)
+
+
 def format_research_summary(
     confidence: float,
     discoveries: list,
@@ -316,8 +399,15 @@ def main():
             messages.append(summary)
 
             if recommendation == 'PROCEED':
-                messages.append("")
-                messages.append("[FIC] Plan validated. Ready for IMPLEMENTATION phase.")
+                # Check for parallel batches
+                batches = extract_parallel_batches(output)
+                if batches:
+                    # Auto-trigger parallel implementation
+                    parallel_instructions = format_parallel_instructions(batches)
+                    messages.append(parallel_instructions)
+                else:
+                    messages.append("")
+                    messages.append("[FIC] Plan validated. Ready for IMPLEMENTATION phase.")
             elif recommendation == 'BLOCK':
                 messages.append("")
                 messages.append("[FIC] Plan validation BLOCKED. Major revision required.")

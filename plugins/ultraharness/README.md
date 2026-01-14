@@ -389,13 +389,17 @@ The plan validator recommends parallelization when:
 }
 ```
 
-### Using Parallel Implementation
+### Using Parallel Implementation (Automated)
 
-1. Create and validate your plan
+Parallel implementation is **automatically triggered** when the plan validator identifies parallelizable tasks:
+
+1. Create and validate your plan with `@fic-plan-validator`
 2. Plan validator outputs `Parallel Execution Plan` with batches
-3. Run `/ultraharness:parallel-implement` to orchestrate
+3. SubagentStop hook **automatically** detects batches and generates spawn instructions
 4. Main agent spawns implementer agents for each batch
 5. Review outputs, resolve conflicts, run tests, commit
+
+No manual command needed - the automation is triggered by the plan validator output.
 
 ### Example Parallel Batch
 
