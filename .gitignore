@@ -5,3 +5,7 @@ claude-features.json
 
 # Firebase debug logs
 firebase-debug.log
+
+# Ultraharness local files
+.claude/fic-*.json
+.claude/.claude-harness-initialized

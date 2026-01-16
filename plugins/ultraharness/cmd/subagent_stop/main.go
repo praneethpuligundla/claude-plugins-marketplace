@@ -25,6 +25,8 @@ var (
 	revisePattern     = regexp.MustCompile(`(?i)\bREVISE\b`)
 	scorePattern      = regexp.MustCompile(`(?i)overall\s+score[:\s]+(\d+)/10`)
 	criticalPattern   = regexp.MustCompile(`(?i)\[CRITICAL\]\s+(.+?)(?:\n|$)`)
+	batchPattern      = regexp.MustCompile(`(?i)#{2,4}\s*Batch\s+(\d+)\s*\(parallel\)`)
+	taskRowPattern    = regexp.MustCompile(`\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|\s*([^|]*)\s*\|`)
 )
 
 func main() {
@@ -102,8 +104,16 @@ func run() error {
 
 		switch recommendation {
 		case "PROCEED":
-			messages = append(messages, "")
-			messages = append(messages, "[FIC] Plan validated. Ready for IMPLEMENTATION phase.")
+			// Check for parallel batches
+			batches := extractParallelBatches(output)
+			if len(batches) > 0 {
+				// Auto-trigger parallel implementation
+				parallelInstructions := formatParallelInstructions(batches)
+				messages = append(messages, parallelInstructions)
+			} else {
+				messages = append(messages, "")
+				messages = append(messages, "[FIC] Plan validated. Ready for IMPLEMENTATION phase.")
+			}
 		case "BLOCK":
 			messages = append(messages, "")
 			messages = append(messages, "[FIC] Plan validation BLOCKED. Major revision required.")
@@ -282,6 +292,132 @@ func extractRecommendation(output string) string {
 		return "REVISE"
 	}
 	return "UNKNOWN"
+}
+
+// ParallelTask represents a task in a parallel batch
+type ParallelTask struct {
+	Task         string
+	Scope        string
+	Dependencies string
+}
+
+// ParallelBatch represents a batch of parallel tasks
+type ParallelBatch struct {
+	BatchNum int
+	Tasks    []ParallelTask
+}
+
+func extractParallelBatches(output string) []ParallelBatch {
+	var batches []ParallelBatch
+
+	// Find all batch headers
+	batchMatches := batchPattern.FindAllStringSubmatchIndex(output, -1)
+	if len(batchMatches) == 0 {
+		return batches
+	}
+
+	for i, match := range batchMatches {
+		if len(match) < 4 {
+			continue
+		}
+
+		// Extract batch number
+		batchNumStr := output[match[2]:match[3]]
+		var batchNum int
+		fmt.Sscanf(batchNumStr, "%d", &batchNum)
+
+		// Find the content between this batch and the next (or end)
+		startIdx := match[1]
+		endIdx := len(output)
+		if i+1 < len(batchMatches) {
+			endIdx = batchMatches[i+1][0]
+		}
+
+		batchContent := output[startIdx:endIdx]
+
+		// Extract tasks from table rows
+		var tasks []ParallelTask
+		taskMatches := taskRowPattern.FindAllStringSubmatch(batchContent, -1)
+
+		for _, taskMatch := range taskMatches {
+			if len(taskMatch) < 4 {
+				continue
+			}
+
+			taskName := strings.TrimSpace(taskMatch[1])
+			scope := strings.TrimSpace(taskMatch[2])
+			deps := strings.TrimSpace(taskMatch[3])
+
+			// Skip header rows
+			taskLower := strings.ToLower(taskName)
+			if taskLower == "task" || strings.HasPrefix(taskLower, "---") || strings.HasPrefix(taskLower, "===") {
+				continue
+			}
+
+			tasks = append(tasks, ParallelTask{
+				Task:         taskName,
+				Scope:        scope,
+				Dependencies: deps,
+			})
+		}
+
+		if len(tasks) > 0 {
+			batches = append(batches, ParallelBatch{
+				BatchNum: batchNum,
+				Tasks:    tasks,
+			})
+		}
+	}
+
+	return batches
+}
+
+func formatParallelInstructions(batches []ParallelBatch) string {
+	if len(batches) == 0 {
+		return ""
+	}
+
+	var lines []string
+	lines = append(lines, "")
+	lines = append(lines, strings.Repeat("=", 50))
+	lines = append(lines, "PARALLEL IMPLEMENTATION - AUTO-TRIGGERED")
+	lines = append(lines, strings.Repeat("=", 50))
+	lines = append(lines, "")
+	lines = append(lines, "Plan validated with parallelization. Execute these batches:")
+	lines = append(lines, "")
+
+	for _, batch := range batches {
+		lines = append(lines, fmt.Sprintf("### Batch %d", batch.BatchNum))
+		lines = append(lines, "")
+		lines = append(lines, "Spawn these agents IN PARALLEL (single message, multiple Task calls):")
+		lines = append(lines, "")
+
+		for i, task := range batch.Tasks {
+			deps := task.Dependencies
+			if deps == "" {
+				deps = "None"
+			}
+
+			lines = append(lines, fmt.Sprintf("**Agent %d:**", i+1))
+			lines = append(lines, "```")
+			lines = append(lines, "Task tool with subagent_type: ultraharness:fic-implementer")
+			lines = append(lines, "prompt: |")
+			lines = append(lines, fmt.Sprintf("  Task: %s", task.Task))
+			lines = append(lines, fmt.Sprintf("  Scope: %s", task.Scope))
+			lines = append(lines, fmt.Sprintf("  Dependencies: %s", deps))
+			lines = append(lines, "```")
+			lines = append(lines, "")
+		}
+	}
+
+	lines = append(lines, "IMPORTANT: Spawn all agents in a batch with ONE message containing")
+	lines = append(lines, "multiple Task tool calls to ensure parallel execution.")
+	lines = append(lines, "")
+	lines = append(lines, "After each batch completes, review results and resolve conflicts")
+	lines = append(lines, "before proceeding to the next batch.")
+	lines = append(lines, strings.Repeat("=", 50))
+
+	return strings.Join(lines, "\n")
 }
 
 func formatResearchSummary(confidence float64, discoveries, files []string, questions []map[string]interface{}) string {
