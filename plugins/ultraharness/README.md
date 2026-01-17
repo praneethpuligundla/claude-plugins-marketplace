@@ -1,6 +1,6 @@
 # UltraHarness Plugin
 
-Advanced Claude Code plugin with **FIC (Flow-Information-Context) System** for intelligent context management, verification gates, and subagent orchestration.
+Advanced Claude Code plugin with **FIC (Flow-Information-Context) System** for intelligent context management, pause-and-prompt checkpoints, and subagent orchestration.
 
 > For a lightweight version without FIC, see [harness](https://github.com/praneethpuligundla/harness)
 
@@ -9,18 +9,31 @@ Advanced Claude Code plugin with **FIC (Flow-Information-Context) System** for i
 Long-running AI agents struggle across multiple context windows because each new session begins without memory of prior work. This plugin solves that problem by providing:
 
 - **Zero Configuration** - Auto-initializes on first session, no setup commands required
-- **FIC System** - Automatic Research → Plan → Implement workflow with verification gates
-- **Context Intelligence** - Tracks what information enters context, detects redundancy
+- **FIC System** - Automatic Research → Plan → Implement workflow with phase checkpoints
+- **Pause-and-Prompt Checkpoints** - Human review at critical phase transitions
+- **Advisory-Only Gates** - Warnings guide workflow without blocking operations
 - **Progress Tracking** - Persistent log file (`claude-progress.txt`) that records accomplishments
 - **Feature Checklists** - JSON file (`claude-features.json`) tracking feature status
 - **Git Checkpoints** - Encourages frequent commits as safe recovery points
-- **Session Startup Routine** - Automatically reads context and FIC state at session start
+- **Lightweight Session Startup** - Minimal context injection (~200 tokens)
 - **Subagent Orchestration** - Auto-suggests delegation to keep main context clean
 - **Native Performance** - Go binaries with Python fallback for cross-platform support
 
 Based on:
 - [Effective Harnesses for Long-Running Agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
-- [Advanced Context Engineering for Coding Agents](https://github.com/humanlayer/advanced-context-engineering-for-coding-agents)
+- [Advanced Context Engineering for Coding Agents](https://github.com/humanlayer/advanced-context-engineering-for-coding-agents) (ACE-FCA)
+
+## Philosophy
+
+This plugin follows the **ACE-FCA philosophy**:
+
+> "Compaction is a PROACTIVE tool for maintaining quality through structured artifacts, not an emergency recovery measure."
+
+Key principles:
+- **Target 40-60% context utilization** - Leave room for complex reasoning
+- **Human review at phase transitions** - Catch errors before they cascade
+- **Advisory, not blocking** - Guide the workflow without interrupting it
+- **Proactive compaction** - Compact after completing phases, not when forced
 
 ## Installation
 
@@ -71,15 +84,34 @@ Mode: standard
 # 4. Use the researcher subagent to keep main context clean
 > @fic-researcher explore the auth system
 
-# 5. Once research is complete, Claude transitions to planning phase
-> Create a plan to add OAuth support
-[FIC Gate: Research confidence at 75%, proceeding to planning]
+# 5. Research completes - PAUSE FOR REVIEW
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  [FIC] RESEARCH PHASE COMPLETE - HUMAN REVIEW RECOMMENDED                   ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║  Confidence: 85% | Files explored: 12 | Discoveries: 5                      ║
+║  PAUSE: Review research findings before proceeding to planning.             ║
+║  Reply with feedback or 'proceed to planning' to continue.                  ║
+╚══════════════════════════════════════════════════════════════════════════════╝
 
-# 6. Plan gets validated, then implement
-> Implement the OAuth integration
-[FIC Gate: Plan validated, proceeding to implementation]
+# 6. Review findings and proceed
+> proceed to planning
 
-# 7. When done, commit your work
+# 7. Create and validate plan
+> @fic-plan-validator validate my OAuth implementation plan
+
+# 8. Plan validated - PAUSE FOR REVIEW
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  [FIC] PLAN VALIDATED - HUMAN REVIEW RECOMMENDED                            ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║  Recommendation: PROCEED | Score: 8/10 | Parallel batches: 2                ║
+║  PAUSE: Review plan before implementation begins.                           ║
+║  Reply with feedback or 'proceed to implementation' to continue.            ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+# 9. Review plan and proceed
+> proceed to implementation
+
+# 10. Implement and commit
 > /commit
 [Checkpoint created - safe recovery point]
 ```
@@ -90,11 +122,13 @@ Mode: standard
 Session 1: Research
 ├── Explore codebase with subagent
 ├── Build 70%+ confidence
-└── Document findings in ResearchArtifact
+├── CHECKPOINT: Human reviews findings
+└── Document in ResearchArtifact
 
 Session 2: Planning
 ├── Create implementation plan
 ├── Validate with @fic-plan-validator
+├── CHECKPOINT: Human reviews plan
 └── Get PROCEED recommendation
 
 Session 3: Implementation
@@ -126,9 +160,9 @@ Shows FIC phase, research confidence, plan validation status, and git state.
 ### Configure FIC Mode
 
 ```
-/ultraharness:configure strict    # Block operations until gates pass
-/ultraharness:configure relaxed   # Allow all operations (override gates)
-/ultraharness:configure standard  # Warn but don't block
+/ultraharness:configure strict    # Warnings with checkpoint enforcement
+/ultraharness:configure relaxed   # Allow all operations (skip checkpoints)
+/ultraharness:configure standard  # Warnings with optional checkpoint review
 ```
 
 ### Run Baseline Tests
@@ -144,10 +178,16 @@ Manually run tests to verify implementation.
 ### Session Start Hook
 
 When a Claude Code session starts in an initialized project:
-1. Reads git log for recent commits
-2. Reads progress file for context
-3. Summarizes feature checklist status
-4. Injects this context into the session
+1. Loads current FIC phase from artifacts
+2. Generates focus directive based on phase
+3. Injects lightweight context (~200 tokens)
+
+Output example:
+```
+[FIC] Session Start
+Phase: PLANNING | Focus: Create actionable implementation plan
+Artifacts: .claude/fic-artifacts | Progress: claude-progress.txt
+```
 
 ### Session Stop Hook
 
@@ -160,7 +200,7 @@ When Claude stops responding:
 
 The FIC system implements intelligent context management for complex, long-running tasks.
 
-### How It Works
+### Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -171,27 +211,31 @@ The FIC system implements intelligent context management for complex, long-runni
 │   USER      │     │  RESEARCH   │     │  PLANNING   │     │IMPLEMENTATION│
 │   PROMPT    │────▶│   PHASE     │────▶│   PHASE     │────▶│    PHASE    │
 └─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
-       │                   │                   │                   │
-       │                   │                   │                   │
-       ▼                   ▼                   ▼                   ▼
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│ UserPrompt  │     │   Gate:     │     │   Gate:     │     │   Gate:     │
-│  Submit     │     │ Confidence  │     │   Plan      │     │   Tests     │
-│   Hook      │     │   >= 70%    │     │ Validated   │     │  Passing    │
-└─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
-       │                   │                   │                   │
-       │                   │                   │                   │
-       ▼                   ▼                   ▼                   ▼
+                           │                   │
+                           ▼                   ▼
+                    ┌─────────────┐     ┌─────────────┐
+                    │ CHECKPOINT  │     │ CHECKPOINT  │
+                    │ Human Review│     │ Human Review│
+                    │ "proceed"   │     │ "proceed"   │
+                    └─────────────┘     └─────────────┘
+
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                         CONTEXT INTELLIGENCE ENGINE                         │
-│  ┌───────────────┐  ┌───────────────┐  ┌───────────────┐  ┌──────────────┐ │
-│  │  Information  │  │  Redundancy   │  │  Utilization  │  │  Compaction  │ │
-│  │Classification │  │  Detection    │  │   Tracking    │  │ Preservation │ │
-│  │Essential/Noise│  │  Same content │  │  Target 40-60%│  │  Save state  │ │
-│  └───────────────┘  └───────────────┘  └───────────────┘  └──────────────┘ │
+│                         PAUSE-AND-PROMPT CHECKPOINTS                        │
+│                                                                             │
+│  Research Complete (70%+ confidence)                                        │
+│  ───────────────────────────────────                                        │
+│  • Formatted summary of findings                                            │
+│  • Files explored, discoveries, open questions                              │
+│  • Requires "proceed to planning" to continue                               │
+│                                                                             │
+│  Plan Validated (PROCEED recommendation)                                    │
+│  ───────────────────────────────────────                                    │
+│  • Score and recommendation displayed                                       │
+│  • Parallel batches identified                                              │
+│  • Requires "proceed to implementation" to continue                         │
+│                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
+
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                            SUBAGENT DELEGATION                              │
 │                                                                             │
@@ -199,50 +243,33 @@ The FIC system implements intelligent context management for complex, long-runni
 │                                                    (Only essential enters   │
 │   "Validate my plan"  ───▶  @fic-plan-validator ──▶  main context)         │
 │                                                                             │
+│   "Implement task Y"  ───▶  @fic-implementer  ───▶  Scoped changes         │
+│                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              HOOK FLOW                                      │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│  SessionStart ──▶ Load preserved context, show FIC state & phase guidance  │
+│  SessionStart ──▶ Lightweight context injection (~200 tokens)               │
 │        │                                                                    │
 │        ▼                                                                    │
-│  UserPromptSubmit ──▶ Detect research/planning prompts, suggest delegation │
+│  UserPromptSubmit ──▶ Check pending checkpoints, suggest delegation         │
 │        │                                                                    │
 │        ▼                                                                    │
-│  PreToolUse ──▶ Check verification gates before Edit/Write operations      │
+│  PreToolUse ──▶ Advisory phase awareness (warnings, never blocks)           │
 │        │                                                                    │
 │        ▼                                                                    │
-│  PostToolUse ──▶ Track context entries, classify information, warn on noise│
+│  PostToolUse ──▶ Simple tool counting, periodic status                      │
 │        │                                                                    │
 │        ▼                                                                    │
-│  SubagentStop ──▶ Extract structured findings from research subagents      │
+│  SubagentStop ──▶ Create checkpoints, extract parallel batches              │
 │        │                                                                    │
 │        ▼                                                                    │
-│  PreCompact ──▶ Preserve essential context, inject focus directive         │
+│  PreCompact ──▶ Preserve essential context for next session                 │
 │        │                                                                    │
 │        ▼                                                                    │
-│  Stop ──▶ Final validation, suggest checkpoint                             │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           ARTIFACTS FLOW                                    │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────────┐  │
-│  │ ResearchArtifact │───▶│   PlanArtifact   │───▶│ImplementationArtifact│  │
-│  ├──────────────────┤    ├──────────────────┤    ├──────────────────────┤  │
-│  │ - discoveries    │    │ - steps          │    │ - steps_completed    │  │
-│  │ - relevant_files │    │ - success_criteria│   │ - plan_deviations    │  │
-│  │ - confidence     │    │ - validation     │    │ - tests_status       │  │
-│  │ - open_questions │    │ - risk_mitigations│   │ - files_modified     │  │
-│  └──────────────────┘    └──────────────────┘    └──────────────────────┘  │
-│          │                       │                        │                 │
-│          ▼                       ▼                        ▼                 │
-│    is_complete()?          is_actionable()?        get_progress()          │
-│    confidence >= 0.7       validation == PROCEED   track plan adherence    │
+│  Stop ──▶ Final validation, suggest checkpoint                              │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -251,61 +278,57 @@ The FIC system implements intelligent context management for complex, long-runni
 
 1. **RESEARCH** - Explore the codebase, build understanding
    - Automatic subagent delegation for exploration
-   - Confidence scoring (must reach 70% to proceed)
+   - Confidence scoring (must reach 70% to trigger checkpoint)
    - Open question tracking (blocking vs non-blocking)
+   - **CHECKPOINT**: Human reviews findings before planning
 
 2. **PLANNING** - Create specific, actionable implementation plan
    - Plan validation via @fic-plan-validator
    - Verification criteria for each step
-   - Risk assessment
+   - Parallel batch identification
+   - **CHECKPOINT**: Human reviews plan before implementation
 
 3. **IMPLEMENTATION** - Execute the plan
    - Track progress against plan steps
    - Document deviations
    - Verification at each step
 
+### Pause-and-Prompt Checkpoints
+
+Human review at phase transitions is the **highest-leverage intervention** to prevent error cascades:
+
+```
+Research mistakes → multiply through planning → thousands of incorrect lines
+Plan errors      → propagate to implementation → hundreds of problematic lines
+```
+
+The plugin creates **mandatory pause points** after:
+- Research completion (70%+ confidence)
+- Plan validation (PROCEED recommendation)
+
+Users must explicitly say "proceed" to continue. This ensures:
+- Findings are reviewed before planning
+- Plans are approved before implementation
+- Errors are caught early, not late
+
+### Advisory-Only Gates
+
+Gates provide guidance without blocking operations:
+
+| Phase | Advisory Message |
+|-------|------------------|
+| Research incomplete | "Note: Starting modifications without prior research..." |
+| Plan not validated | "Advisory: Plan not yet validated..." |
+| Implementation ready | No message (proceed freely) |
+
+**Important**: Gates NEVER block individual tool calls. The correct model is pause-and-prompt at phase boundaries, not blocking Edit/Write operations.
+
 ### Context Intelligence
 
-- **Information Classification** - Essential / Helpful / Noise
-- **Redundancy Detection** - Alerts when re-reading same content
-- **Weighted Tool Tracking** - Tracks tool calls by type with weighted token estimates
-- **Utilization Tracking** - Target 40-60% context utilization
-- **Auto-Compaction** - Automatically triggers `/compact` when thresholds are hit
+- **Simple Tool Counting** - Tracks tool calls without complex token estimation
+- **Periodic Status** - Shows progress every 15 tool calls
+- **Target 40-60% Utilization** - Proactive compaction, not emergency recovery
 - **Compaction Preservation** - Essential context preserved across sessions
-
-### Auto-Compaction
-
-When context fills up, the harness automatically triggers compaction:
-
-| Metric | Warning | Critical (Auto-Compact) |
-|--------|---------|------------------------|
-| Tool Calls | 33+ calls | 50+ calls |
-| Utilization | 60%+ | 85%+ |
-
-At critical threshold, the harness outputs:
-```
-[FIC] AUTO-COMPACTION TRIGGERED
-MANDATORY: You MUST run /compact NOW before doing anything else.
-```
-
-To disable auto-compaction, set in config:
-```json
-{
-  "fic_config": {
-    "auto_compact_enabled": false
-  }
-}
-```
-
-### Verification Gates
-
-In **strict mode**, gates enforce phase transitions:
-
-| Gate | Condition |
-|------|-----------|
-| Research → Planning | Confidence >= 70%, no blocking questions |
-| Planning → Implementation | Plan validation == PROCEED |
-| Implementation → Commit | All tests passing |
 
 ### Configuration
 
@@ -314,17 +337,13 @@ Configure FIC in `.claude/claude-harness.json`:
 ```json
 {
   "fic_enabled": true,
-  "fic_strict_gates": true,
-  "fic_auto_delegate_research": true,
-  "fic_context_tracking": true,
+  "strictness": "standard",
   "fic_config": {
-    "auto_compact_threshold": 0.85,
     "target_utilization_low": 0.40,
     "target_utilization_high": 0.60,
+    "suggest_compact_at": 0.55,
     "research_confidence_threshold": 0.7,
-    "max_open_questions": 2,
-    "compaction_tool_threshold": 50,
-    "auto_compact_enabled": true,
+    "require_checkpoint_review": true,
     "parallel_implementation_enabled": true,
     "max_parallel_agents": 3,
     "min_steps_for_parallel": 3
@@ -377,18 +396,6 @@ The plan validator recommends parallelization when:
 - No circular dependencies
 - Clear scope boundaries exist
 
-### Configuration
-
-```json
-{
-  "fic_config": {
-    "parallel_implementation_enabled": true,
-    "max_parallel_agents": 3,
-    "min_steps_for_parallel": 3
-  }
-}
-```
-
 ### Using Parallel Implementation (Automated)
 
 Parallel implementation is **automatically triggered** when the plan validator identifies parallelizable tasks:
@@ -401,29 +408,48 @@ Parallel implementation is **automatically triggered** when the plan validator i
 
 No manual command needed - the automation is triggered by the plan validator output.
 
-### Example Parallel Batch
+### Example Parallel Batch Output
 
-From plan validator:
+From plan validator checkpoint:
 ```
-#### Batch 1 (parallel)
-| Task | Scope | Dependencies |
-|------|-------|--------------|
-| Add user API | src/api/user* | None |
-| Add user UI | src/components/User* | None |
-| Add user service | src/services/user* | None |
-```
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  [FIC] PLAN VALIDATED - HUMAN REVIEW RECOMMENDED                            ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║  Recommendation: PROCEED | Score: 8/10                                      ║
+║  Parallel batches: 2 | Total tasks: 4                                       ║
+╚══════════════════════════════════════════════════════════════════════════════╝
 
-Main agent spawns 3 `fic-implementer` agents with these scopes, waits for completion, then merges results.
+==================================================
+PARALLEL IMPLEMENTATION - AUTO-TRIGGERED
+==================================================
+
+### Batch 1
+
+Spawn these agents IN PARALLEL (single message, multiple Task calls):
+
+**Agent 1:**
+Task tool with subagent_type: ultraharness:fic-implementer
+prompt: |
+  Task: Add user API
+  Scope: src/api/user*
+  Dependencies: None
+
+**Agent 2:**
+Task tool with subagent_type: ultraharness:fic-implementer
+prompt: |
+  Task: Add user UI
+  Scope: src/components/User*
+  Dependencies: None
+```
 
 ## Best Practices
 
-1. **Initialize early** - Set up harness at project start
-2. **List all features** - Comprehensive checklist prevents premature completion
-3. **Work incrementally** - One feature at a time
-4. **Commit often** - Each commit is a recovery point
-5. **Log everything** - Future sessions depend on this context
-6. **Use subagents for exploration** - Keep main context clean
-7. **Build confidence before implementing** - Research thoroughly first
+1. **Let research complete naturally** - Build 70%+ confidence before planning
+2. **Review checkpoints carefully** - This is where you catch errors early
+3. **Use subagents for exploration** - Keep main context clean
+4. **Compact proactively** - After phases complete, not when forced
+5. **Commit frequently** - Each commit is a recovery point
+6. **Log everything** - Future sessions depend on this context
 
 ## File Structure
 
@@ -435,8 +461,8 @@ project/
 └── .claude/
     ├── .claude-harness-initialized  # Marker file
     ├── claude-harness.json          # Configuration
-    ├── fic-context-state.json       # Context intelligence state
-    ├── fic-preserved-context.json   # Preserved context across sessions
+    ├── fic-context-state.json       # Simple tool counting state
+    ├── fic-checkpoint-state.json    # Pending/completed checkpoints
     └── fic-artifacts/               # FIC workflow artifacts
         ├── research/
         ├── plans/
@@ -452,21 +478,21 @@ ultraharness/
 ├── .claude-plugin/
 │   └── plugin.json           # Plugin manifest
 ├── cmd/                      # Go hook entry points
-│   ├── session_start/        # Session startup with FIC state
-│   ├── user_prompt_submit/   # Auto-delegation detection
-│   ├── pre_tool_use/         # Verification gates
-│   ├── post_tool_use/        # Context intelligence tracking
+│   ├── session_start/        # Lightweight context injection
+│   ├── user_prompt_submit/   # Checkpoint enforcement, delegation
+│   ├── pre_tool_use/         # Advisory phase awareness
+│   ├── post_tool_use/        # Simple tool counting
 │   ├── pre_compact/          # Context preservation
-│   ├── subagent_stop/        # Research result processing
+│   ├── subagent_stop/        # Checkpoint creation, parallel batches
 │   └── stop/                 # Session stop validation
 ├── internal/                 # Shared Go packages
 │   ├── protocol/             # JSON stdin/stdout communication
 │   ├── config/               # Configuration management
 │   ├── validation/           # Input validation
 │   ├── git/                  # Git operations
-│   ├── artifacts/            # FIC artifact management
-│   ├── context/              # Context tracking
-│   ├── gates/                # Verification gates
+│   ├── artifacts/            # FIC artifact management + checkpoints
+│   ├── context/              # Simple tool counting
+│   ├── gates/                # Advisory-only gates
 │   ├── progress/             # Progress file handling
 │   ├── features/             # Feature checklist
 │   └── testrunner/           # Test execution
@@ -481,7 +507,8 @@ ultraharness/
 │   └── *.py                  # Python implementations
 ├── agents/
 │   ├── fic-researcher.md     # Research subagent definition
-│   └── fic-plan-validator.md # Plan validation subagent
+│   ├── fic-plan-validator.md # Plan validation subagent
+│   └── fic-implementer.md    # Implementation subagent
 ├── commands/
 │   ├── init.md
 │   ├── status.md
@@ -500,7 +527,7 @@ ultraharness/
 
 Build for all platforms:
 ```bash
-make all    # Builds darwin-arm64, darwin-amd64, linux-amd64
+make all    # Builds darwin-arm64, darwin-amd64, linux-amd64, windows-amd64
 make test   # Run tests
 ```
 
@@ -519,21 +546,29 @@ claude plugins:remove ultraharness
 claude plugins:add praneethpuligundla/ultraharness
 ```
 
-### Gates blocking unexpectedly
+### Checkpoint not clearing
 
-**Symptom:** "Research phase not complete" when you want to edit.
+**Symptom:** Keep getting "CHECKPOINT PENDING" message.
 
 ```bash
-# Check current FIC state
-/ultraharness:status
+# Say "proceed" explicitly in your message
+> I've reviewed, proceed to planning
 
-# Switch to relaxed mode to bypass gates temporarily
-/ultraharness:configure relaxed
+# Or check checkpoint state
+cat .claude/fic-checkpoint-state.json
 
-# Or force initialization to reset state
-rm -rf .claude/fic-*
-/ultraharness:init
+# Clear manually if needed
+rm .claude/fic-checkpoint-state.json
 ```
+
+### Advisory messages appearing
+
+**Symptom:** Seeing "Note: Starting modifications without prior research..."
+
+This is expected behavior - the plugin is advising you to complete research first. You can:
+1. Continue anyway (advisory only, won't block)
+2. Use `@fic-researcher` to build research confidence
+3. Switch to relaxed mode: `/ultraharness:configure relaxed`
 
 ### Go binary not executing
 
@@ -566,18 +601,6 @@ cat .claude/.claude-harness-initialized
 echo "[$(date)] TEST: Manual entry" >> claude-progress.txt
 ```
 
-### Context not preserved across sessions
-
-**Symptom:** New sessions start without prior context.
-
-```bash
-# Check preserved context file
-cat .claude/fic-preserved-context.json
-
-# Ensure PreCompact hook ran before session ended
-grep "PreCompact" claude-progress.txt
-```
-
 ## FAQ
 
 **Q: Can I use this with the lightweight `harness` plugin?**
@@ -586,11 +609,14 @@ No, use one or the other. UltraHarness includes all harness features plus FIC.
 **Q: How do I reset the FIC state?**
 Delete `.claude/fic-*.json` files and run `/ultraharness:init`.
 
-**Q: Can I customize the research confidence threshold?**
-Yes, edit `.claude/claude-harness.json` and set `fic_config.research_confidence_threshold`.
+**Q: Can I disable checkpoint enforcement?**
+Yes, set `require_checkpoint_review: false` in config, or use `/ultraharness:configure relaxed`.
+
+**Q: Why don't gates block Edit/Write operations?**
+By design. Blocking individual tools is the wrong model - pause-and-prompt at phase boundaries is more effective and less disruptive.
 
 **Q: Why use Go binaries instead of Python?**
 Performance. Go hooks execute in ~10ms vs ~200ms for Python, reducing latency on every tool call.
 
 **Q: Does this work on Windows?**
-Yes! Windows amd64 binaries are included. Use Git Bash, WSL, or MSYS2 to run the `run-hook` wrapper script. The script auto-detects Windows environments (MINGW/CYGWIN/MSYS) and uses the `.exe` binaries.
+Yes! Windows amd64 binaries are included. Use Git Bash, WSL, or MSYS2 to run the `run-hook` wrapper script.
