@@ -1,7 +1,14 @@
 #!/bin/bash
 # Auto-detect platform and run the appropriate Go binary hook
 set -e
+
+# Security: Sanitize HOOK_NAME to prevent path traversal
 HOOK_NAME="$1"
+# Reject empty, path separators, parent directory references, and non-alphanumeric (except underscore/hyphen)
+if [ -z "$HOOK_NAME" ] || [[ "$HOOK_NAME" =~ [/\\] ]] || [[ "$HOOK_NAME" =~ \.\. ]] || [[ ! "$HOOK_NAME" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+    echo '{"systemMessage": "[Harness] Invalid hook name"}'
+    exit 0
+fi
 shift 2>/dev/null || true
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PLUGIN_ROOT="$(dirname "$SCRIPT_DIR")"
@@ -31,7 +38,8 @@ else
     if [ -f "$PYTHON_HOOK" ]; then
         exec python3 "$PYTHON_HOOK" "$@"
     else
-        echo "{\"systemMessage\": \"[Harness] Hook not found: $HOOK_NAME\"}"
+        # HOOK_NAME is already validated to be alphanumeric/underscore/hyphen only
+        printf '{"systemMessage": "[Harness] Hook not found: %s"}\n' "$HOOK_NAME"
         exit 0
     fi
 fi
