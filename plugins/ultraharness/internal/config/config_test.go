@@ -34,18 +34,21 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("CheckpointIntervalMinutes = %d, want 30", cfg.CheckpointIntervalMinutes)
 	}
 
-	// Check FIC config defaults
+	// Check FIC config defaults (new philosophy: proactive compaction, not emergency)
 	if cfg.FICConfig == nil {
 		t.Fatal("FICConfig should not be nil")
 	}
-	if cfg.FICConfig.AutoCompactThreshold != 0.85 {
-		t.Errorf("AutoCompactThreshold = %f, want 0.85", cfg.FICConfig.AutoCompactThreshold)
+	if cfg.FICConfig.TargetUtilizationLow != 0.40 {
+		t.Errorf("TargetUtilizationLow = %f, want 0.40", cfg.FICConfig.TargetUtilizationLow)
 	}
-	if cfg.FICConfig.CompactionToolThreshold != 50 {
-		t.Errorf("CompactionToolThreshold = %d, want 50", cfg.FICConfig.CompactionToolThreshold)
+	if cfg.FICConfig.TargetUtilizationHigh != 0.60 {
+		t.Errorf("TargetUtilizationHigh = %f, want 0.60", cfg.FICConfig.TargetUtilizationHigh)
 	}
-	if !cfg.FICConfig.AutoCompactEnabled {
-		t.Error("AutoCompactEnabled should be true by default")
+	if cfg.FICConfig.SuggestCompactAt != 0.55 {
+		t.Errorf("SuggestCompactAt = %f, want 0.55", cfg.FICConfig.SuggestCompactAt)
+	}
+	if !cfg.FICConfig.RequireCheckpointReview {
+		t.Error("RequireCheckpointReview should be true by default")
 	}
 }
 
@@ -104,7 +107,7 @@ func TestStrictnessModes(t *testing.T) {
 	}
 }
 
-func TestGetAutoCompactThreshold(t *testing.T) {
+func TestGetSuggestCompactAt(t *testing.T) {
 	tests := []struct {
 		name      string
 		cfg       *Config
@@ -113,24 +116,24 @@ func TestGetAutoCompactThreshold(t *testing.T) {
 		{
 			name:      "nil FICConfig uses default",
 			cfg:       &Config{FICConfig: nil},
-			wantValue: 0.85,
+			wantValue: 0.55,
 		},
 		{
 			name:      "zero threshold uses default",
-			cfg:       &Config{FICConfig: &FICConfig{AutoCompactThreshold: 0}},
-			wantValue: 0.85,
+			cfg:       &Config{FICConfig: &FICConfig{SuggestCompactAt: 0}},
+			wantValue: 0.55,
 		},
 		{
 			name:      "custom threshold",
-			cfg:       &Config{FICConfig: &FICConfig{AutoCompactThreshold: 0.80}},
-			wantValue: 0.80,
+			cfg:       &Config{FICConfig: &FICConfig{SuggestCompactAt: 0.50}},
+			wantValue: 0.50,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.cfg.GetAutoCompactThreshold(); got != tt.wantValue {
-				t.Errorf("GetAutoCompactThreshold() = %v, want %v", got, tt.wantValue)
+			if got := tt.cfg.GetSuggestCompactAt(); got != tt.wantValue {
+				t.Errorf("GetSuggestCompactAt() = %v, want %v", got, tt.wantValue)
 			}
 		})
 	}
@@ -145,12 +148,12 @@ func TestGetCompactionToolThreshold(t *testing.T) {
 		{
 			name:      "nil FICConfig uses default",
 			cfg:       &Config{FICConfig: nil},
-			wantValue: 50,
+			wantValue: 100,
 		},
 		{
 			name:      "zero threshold uses default",
 			cfg:       &Config{FICConfig: &FICConfig{CompactionToolThreshold: 0}},
-			wantValue: 50,
+			wantValue: 100,
 		},
 		{
 			name:      "custom threshold",
@@ -384,6 +387,8 @@ func TestGateBehaviorGetters(t *testing.T) {
 		if !cfg.ShouldWarnOnPlanIncomplete() {
 			t.Error("ShouldWarnOnPlanIncomplete() should default to true")
 		}
+		// BlockInStrictMode now defaults to true for backward compatibility
+		// but the gate behavior is advisory-only regardless
 		if !cfg.ShouldBlockInStrictMode() {
 			t.Error("ShouldBlockInStrictMode() should default to true")
 		}

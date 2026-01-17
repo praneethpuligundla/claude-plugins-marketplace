@@ -1,9 +1,14 @@
-// SubagentStop hook processes research subagent results.
+// SubagentStop hook processes research and plan validation results.
+//
+// Philosophy: Implement pause-and-prompt checkpoints at phase transitions.
+// Human review at Research→Planning and Planning→Implementation is the
+// highest-leverage intervention to prevent error cascades.
 //
 // This hook runs when a subagent completes to:
-// 1. Detect if it was a FIC research subagent
+// 1. Detect if it was a FIC research or plan-validator subagent
 // 2. Extract structured findings from the output
-// 3. Inject only essential findings into main context
+// 3. Set pending checkpoints requiring human review
+// 4. Format pause-and-prompt messages for phase transitions
 package main
 
 import (
@@ -12,6 +17,7 @@ import (
 	"regexp"
 	"strings"
 
+	"ultraharness/internal/artifacts"
 	"ultraharness/internal/config"
 	"ultraharness/internal/protocol"
 	"ultraharness/internal/validation"
@@ -74,7 +80,8 @@ func run() error {
 		return protocol.WriteEmpty()
 	}
 
-	var messages []string
+	// Check if checkpoints are enabled
+	requireCheckpoint := cfg.RequireCheckpointReview()
 
 	// Check if this was a research subagent
 	if isResearchSubagent(subagentType, description) {
@@ -84,50 +91,143 @@ func run() error {
 		files := extractRelevantFiles(output)
 		questions := extractOpenQuestions(output)
 
-		// Format summary for main context
-		summary := formatResearchSummary(confidence, discoveries, files, questions)
-		messages = append(messages, summary)
-
-		// Add guidance based on confidence
-		if confidence >= 0.7 {
-			messages = append(messages, "")
-			messages = append(messages, "[FIC] Research confidence threshold met. Ready for PLANNING phase.")
-		} else {
-			messages = append(messages, "")
-			messages = append(messages, fmt.Sprintf("[FIC] Research confidence at %.0f%%. Continue to build understanding.", confidence*100))
+		// Count blocking questions
+		blockingQuestions := 0
+		for _, q := range questions {
+			if b, ok := q["blocking"].(bool); ok && b {
+				blockingQuestions++
+			}
 		}
+
+		// Check if research is complete (70%+ confidence)
+		if confidence >= 0.7 {
+			// Format pause-and-prompt checkpoint message
+			msg := formatResearchCheckpoint(confidence, len(discoveries), len(files), len(questions), blockingQuestions)
+
+			// Set pending checkpoint if enabled
+			if requireCheckpoint {
+				summary := fmt.Sprintf("Research %.0f%% confident, %d discoveries, %d files explored",
+					confidence*100, len(discoveries), len(files))
+				artifacts.SetPendingCheckpoint(workDir, "RESEARCH", summary)
+			}
+
+			return protocol.WriteSystemMessage(msg)
+		}
+
+		// Not yet complete - just show summary
+		summary := formatResearchSummary(confidence, discoveries, files, questions)
+		msg := summary + "\n\n" + fmt.Sprintf("[FIC] Research at %.0f%% confidence. Continue to build understanding (target: 70%%).", confidence*100)
+		return protocol.WriteSystemMessage(msg)
+
 	} else if isPlanValidator(subagentType, description) {
 		// Check if this was a plan validator
 		recommendation := extractRecommendation(output)
-		summary := formatValidationSummary(recommendation, output)
-		messages = append(messages, summary)
+		score := extractScore(output)
 
 		switch recommendation {
 		case "PROCEED":
-			// Check for parallel batches
+			// Format pause-and-prompt checkpoint message
 			batches := extractParallelBatches(output)
-			if len(batches) > 0 {
-				// Auto-trigger parallel implementation
-				parallelInstructions := formatParallelInstructions(batches)
-				messages = append(messages, parallelInstructions)
-			} else {
-				messages = append(messages, "")
-				messages = append(messages, "[FIC] Plan validated. Ready for IMPLEMENTATION phase.")
+			msg := formatPlanCheckpoint(recommendation, score, batches)
+
+			// Set pending checkpoint if enabled
+			if requireCheckpoint {
+				summary := fmt.Sprintf("Plan validated (PROCEED), score %d/10", score)
+				if len(batches) > 0 {
+					summary += fmt.Sprintf(", %d parallel batches", len(batches))
+				}
+				artifacts.SetPendingCheckpoint(workDir, "PLANNING", summary)
 			}
+
+			return protocol.WriteSystemMessage(msg)
+
 		case "BLOCK":
-			messages = append(messages, "")
-			messages = append(messages, "[FIC] Plan validation BLOCKED. Major revision required.")
+			msg := formatValidationSummary(recommendation, output)
+			msg += "\n\n[FIC] Plan validation BLOCKED. Major revision required before proceeding."
+			return protocol.WriteSystemMessage(msg)
+
 		case "REVISE":
-			messages = append(messages, "")
-			messages = append(messages, "[FIC] Plan needs revision. Address feedback before implementation.")
+			msg := formatValidationSummary(recommendation, output)
+			msg += "\n\n[FIC] Plan needs revision. Address feedback and re-validate before implementation."
+			return protocol.WriteSystemMessage(msg)
+
+		default:
+			summary := formatValidationSummary(recommendation, output)
+			return protocol.WriteSystemMessage(summary)
 		}
 	}
 
-	// Output result
-	if len(messages) > 0 {
-		return protocol.WriteSystemMessage(strings.Join(messages, "\n"))
-	}
 	return protocol.WriteEmpty()
+}
+
+// formatResearchCheckpoint formats the pause-and-prompt message for research completion.
+func formatResearchCheckpoint(confidence float64, discoveries, files, questions, blockingQuestions int) string {
+	var lines []string
+	lines = append(lines, "╔══════════════════════════════════════════════════════════════════════════════╗")
+	lines = append(lines, "║  [FIC] RESEARCH PHASE COMPLETE - HUMAN REVIEW RECOMMENDED                   ║")
+	lines = append(lines, "╠══════════════════════════════════════════════════════════════════════════════╣")
+	lines = append(lines, "║                                                                              ║")
+	lines = append(lines, fmt.Sprintf("║  Confidence: %.0f%% | Files explored: %d | Discoveries: %d                   ║",
+		confidence*100, files, discoveries))
+	lines = append(lines, "║                                                                              ║")
+
+	if blockingQuestions > 0 {
+		lines = append(lines, fmt.Sprintf("║  ⚠ Open Questions: %d (%d blocking)                                          ║",
+			questions, blockingQuestions))
+		lines = append(lines, "║                                                                              ║")
+	}
+
+	lines = append(lines, "║  PAUSE: Review research findings before proceeding to planning.             ║")
+	lines = append(lines, "║  Reply with feedback or 'proceed to planning' to continue.                  ║")
+	lines = append(lines, "║                                                                              ║")
+	lines = append(lines, "╚══════════════════════════════════════════════════════════════════════════════╝")
+
+	return strings.Join(lines, "\n")
+}
+
+// formatPlanCheckpoint formats the pause-and-prompt message for plan validation.
+func formatPlanCheckpoint(recommendation string, score int, batches []ParallelBatch) string {
+	var lines []string
+	lines = append(lines, "╔══════════════════════════════════════════════════════════════════════════════╗")
+	lines = append(lines, "║  [FIC] PLAN VALIDATED - HUMAN REVIEW RECOMMENDED                            ║")
+	lines = append(lines, "╠══════════════════════════════════════════════════════════════════════════════╣")
+	lines = append(lines, "║                                                                              ║")
+	lines = append(lines, fmt.Sprintf("║  Recommendation: %s | Score: %d/10                                         ║",
+		recommendation, score))
+
+	if len(batches) > 0 {
+		totalTasks := 0
+		for _, b := range batches {
+			totalTasks += len(b.Tasks)
+		}
+		lines = append(lines, fmt.Sprintf("║  Parallel batches: %d | Total tasks: %d                                      ║",
+			len(batches), totalTasks))
+	}
+
+	lines = append(lines, "║                                                                              ║")
+	lines = append(lines, "║  PAUSE: Review plan before implementation begins.                           ║")
+	lines = append(lines, "║  Reply with feedback or 'proceed to implementation' to continue.            ║")
+	lines = append(lines, "║                                                                              ║")
+	lines = append(lines, "╚══════════════════════════════════════════════════════════════════════════════╝")
+
+	// Add parallel instructions if available
+	if len(batches) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, formatParallelInstructions(batches))
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// extractScore extracts the overall score from validation output.
+func extractScore(output string) int {
+	scoreMatches := scorePattern.FindStringSubmatch(output)
+	if len(scoreMatches) > 1 {
+		var score int
+		fmt.Sscanf(scoreMatches[1], "%d", &score)
+		return score
+	}
+	return 0
 }
 
 func isResearchSubagent(subagentType, description string) bool {

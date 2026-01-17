@@ -1,11 +1,12 @@
 // PostToolUse hook handles context tracking, change detection, and progress logging.
 //
 // This hook runs after Edit, Write, Bash, Read, Grep, Glob, and Task tools to:
-// 1. Track context utilization with weighted tool estimates
-// 2. Warn when context is filling up (50%+)
-// 3. Trigger compaction directive when critical (70%+)
-// 4. Auto-log significant changes
-// 5. Suggest checkpoints after major changes
+// 1. Track tool call counts (simple, non-intrusive)
+// 2. Auto-log significant changes
+// 3. Provide periodic status updates
+//
+// Philosophy: Compaction is a PROACTIVE quality tool, not an emergency measure.
+// This hook provides information but does NOT demand or trigger compaction.
 package main
 
 import (
@@ -19,13 +20,6 @@ import (
 	"ultraharness/internal/progress"
 	"ultraharness/internal/protocol"
 	"ultraharness/internal/validation"
-)
-
-// Default thresholds if not configured
-const (
-	DefaultToolCountWarning  = 30  // Warn after 30 tool calls
-	DefaultToolCountCritical = 50  // Critical after 50 tool calls
-	DefaultUtilizationWarn   = 0.5 // 50% utilization warning
 )
 
 func main() {
@@ -61,14 +55,10 @@ func run() error {
 
 	var messages []string
 
-	// Context intelligence tracking
+	// Context tracking (non-intrusive)
 	if cfg.FICEnabled && cfg.FICContextTracking {
-		msg := trackContext(input, workDir, cfg)
+		msg := trackContext(input, workDir)
 		if msg != "" {
-			// If compaction is needed, return immediately with high priority
-			if strings.Contains(msg, "CRITICAL") || strings.Contains(msg, "ACTION REQUIRED") {
-				return protocol.WriteMessage(msg)
-			}
 			messages = append(messages, msg)
 		}
 	}
@@ -113,7 +103,9 @@ func run() error {
 	return protocol.WriteEmpty()
 }
 
-func trackContext(input *protocol.HookInput, workDir string, cfg *config.Config) string {
+// trackContext provides non-intrusive context tracking.
+// It tracks tool usage and provides periodic status updates without demanding compaction.
+func trackContext(input *protocol.HookInput, workDir string) string {
 	sessionID := input.SessionID
 	if sessionID == "" {
 		sessionID = "default"
@@ -137,137 +129,15 @@ func trackContext(input *protocol.HookInput, workDir string, cfg *config.Config)
 		// Continue even if save fails
 	}
 
-	// Get thresholds from config
-	autoCompactThreshold := cfg.GetAutoCompactThreshold()
-	compactionToolThreshold := cfg.GetCompactionToolThreshold()
-	if compactionToolThreshold == 0 {
-		compactionToolThreshold = DefaultToolCountCritical
-	}
-	autoCompactEnabled := cfg.IsAutoCompactEnabled()
-
-	// Check for CRITICAL: auto-compaction needed (token-based)
-	if state.NeedsCompaction(autoCompactThreshold) {
-		if autoCompactEnabled {
-			return buildAutoCompactDirective(state, "utilization", autoCompactThreshold)
-		}
-		return buildCompactionDirective(state, autoCompactThreshold)
-	}
-
-	// Check for CRITICAL: tool count exceeded
-	if state.NeedsCompactionByToolCount(compactionToolThreshold) {
-		if autoCompactEnabled {
-			return buildAutoCompactDirective(state, "tool_count", float64(compactionToolThreshold))
-		}
-		return buildToolCountDirective(state, compactionToolThreshold)
-	}
-
-	// Check for WARNING: approaching limits
-	warningToolCount := compactionToolThreshold * 2 / 3 // ~67% of critical
-	if state.TotalToolCalls >= warningToolCount || state.UtilizationPercent >= DefaultUtilizationWarn {
-		return buildWarningMessage(state, compactionToolThreshold)
-	}
-
-	// Periodic status update every 10 tool calls
-	if state.TotalToolCalls > 0 && state.TotalToolCalls%10 == 0 {
-		return fmt.Sprintf("[FIC] %s", state.GetSummary())
+	// Periodic status update every 15 tool calls (non-intrusive)
+	if state.TotalToolCalls > 0 && state.TotalToolCalls%15 == 0 {
+		return fmt.Sprintf("[FIC] Session progress: %d tool calls | Compactions: %d",
+			state.TotalToolCalls, state.CompactionCount)
 	}
 
 	return ""
 }
 
-func buildAutoCompactDirective(state *context.ContextState, reason string, threshold float64) string {
-	var triggerInfo string
-	if reason == "utilization" {
-		triggerInfo = fmt.Sprintf("Context utilization: %.0f%% (threshold: %.0f%%)", state.UtilizationPercent*100, threshold*100)
-	} else {
-		triggerInfo = fmt.Sprintf("Tool calls: %d (threshold: %.0f)", state.TotalToolCalls, threshold)
-	}
-
-	return fmt.Sprintf(`
-╔══════════════════════════════════════════════════════════════════════════════╗
-║  [FIC] AUTO-COMPACTION TRIGGERED                                             ║
-╠══════════════════════════════════════════════════════════════════════════════╣
-║                                                                              ║
-║  %s
-║  %s
-║                                                                              ║
-║  Compactions so far: %d
-║                                                                              ║
-╚══════════════════════════════════════════════════════════════════════════════╝
-
-MANDATORY: You MUST run /compact NOW before doing anything else.
-
-This is an automated compaction trigger. The context window is filling up.
-Running /compact will:
-1. Preserve essential context (phase, discoveries, progress)
-2. Reset the context window for continued work
-3. Maintain your current focus and task
-
-Execute: /compact`,
-		triggerInfo,
-		state.GetSummary(),
-		state.CompactionCount)
-}
-
-func buildCompactionDirective(state *context.ContextState, threshold float64) string {
-	return fmt.Sprintf(`
-╔══════════════════════════════════════════════════════════════════════════════╗
-║  [FIC] CRITICAL: CONTEXT UTILIZATION AT %.0f%%                                 ║
-║  LONG-RUNNING SESSION - COMPACTION REQUIRED                                   ║
-╠══════════════════════════════════════════════════════════════════════════════╣
-║                                                                                ║
-║  %s
-║                                                                                ║
-║  Threshold: %.0f%% | Compactions so far: %d
-║                                                                                ║
-║  ACTION REQUIRED: Run /compact NOW before continuing.                         ║
-║                                                                                ║
-║  Context is filling up. Compacting now preserves essential discoveries        ║
-║  and prevents context overflow and degraded performance.                      ║
-║                                                                                ║
-╚══════════════════════════════════════════════════════════════════════════════╝
-
-STOP current work. Run /compact immediately.
-The PreCompact hook will preserve essential context automatically.`,
-		state.UtilizationPercent*100,
-		state.GetSummary(),
-		threshold*100,
-		state.CompactionCount)
-}
-
-func buildToolCountDirective(state *context.ContextState, maxTools int) string {
-	return fmt.Sprintf(`
-╔══════════════════════════════════════════════════════════════════════════════╗
-║  [FIC] CRITICAL: %d TOOL CALLS - COMPACTION RECOMMENDED                       ║
-╠══════════════════════════════════════════════════════════════════════════════╣
-║                                                                                ║
-║  %s
-║                                                                                ║
-║  Tool limit: %d | Compactions so far: %d
-║                                                                                ║
-║  ACTION REQUIRED: Consider running /compact to free up context space.         ║
-║                                                                                ║
-║  High tool count indicates a long-running session. Compacting preserves       ║
-║  essential context and improves response quality.                             ║
-║                                                                                ║
-╚══════════════════════════════════════════════════════════════════════════════╝`,
-		state.TotalToolCalls,
-		state.GetSummary(),
-		maxTools,
-		state.CompactionCount)
-}
-
-func buildWarningMessage(state *context.ContextState, maxTools int) string {
-	remaining := maxTools - state.TotalToolCalls
-	if remaining < 0 {
-		remaining = 0
-	}
-	return fmt.Sprintf("[FIC] Context filling: %.0f%% util, %d/%d tool calls. ~%d calls until compaction recommended.",
-		state.UtilizationPercent*100,
-		state.TotalToolCalls,
-		maxTools,
-		remaining)
-}
 
 func classifyAndLog(toolName string, input *protocol.HookInput, workDir string) string {
 	// Classify change level based on tool and file

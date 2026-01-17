@@ -1,16 +1,19 @@
-// PreToolUse hook enforces FIC verification gates for file modifications.
+// PreToolUse hook provides phase awareness for file modifications.
 //
-// Gate behavior by strictness mode:
-// - relaxed: No validation, all operations allowed
-// - standard: Warn on gate violations, allow operation
-// - strict: Block operations that violate gates
+// Philosophy: NEVER block individual tools. Gates are advisory, not blocking.
+// The correct model is to pause at phase boundaries, not tool boundaries.
+//
+// This hook runs before Edit/Write tools to:
+// - Provide phase awareness messages (advisory only)
+// - Help users understand the workflow context
+// - NEVER deny tool execution (that's the old wrong model)
 package main
 
 import (
 	"os"
 
+	"ultraharness/internal/artifacts"
 	"ultraharness/internal/config"
-	"ultraharness/internal/gates"
 	"ultraharness/internal/protocol"
 	"ultraharness/internal/validation"
 )
@@ -51,7 +54,7 @@ func run() error {
 		return protocol.WriteEmpty()
 	}
 
-	// Only check gates for file modifications
+	// Only provide awareness for file modifications
 	toolName := input.ToolName
 	if toolName != "Edit" && toolName != "Write" {
 		return protocol.WriteEmpty()
@@ -62,32 +65,40 @@ func run() error {
 		return protocol.WriteEmpty()
 	}
 
-	// Determine which gate to check
-	var gate string
-	if toolName == "Edit" {
-		gate = gates.GateAllowEdit
-	} else {
-		gate = gates.GateAllowWrite
+	// Get current phase for awareness (NOT blocking)
+	phase := artifacts.GetCurrentPhase(workDir)
+
+	// Provide advisory messages based on phase (never block)
+	msg := getPhaseAwarenessMessage(phase, toolName, cfg)
+	if msg != "" {
+		return protocol.WriteMessage(msg)
 	}
 
-	// Check the gate
-	result := gates.CheckGate(gate, workDir, cfg.Strictness)
+	return protocol.WriteEmpty()
+}
 
-	// Handle result
-	switch result.Action {
-	case gates.ActionBlock:
-		msg := gates.FormatGateMessage(result)
-		msg += "\n\n[FIC Gate: Operation blocked. Complete prior phase first.]"
-		return protocol.WriteDeny(msg)
-
-	case gates.ActionWarn:
-		msg := gates.FormatGateMessage(result)
-		if msg != "" {
-			return protocol.WriteMessage(msg)
+// getPhaseAwarenessMessage returns an advisory message based on the current phase.
+// This NEVER blocks - it only provides helpful context.
+func getPhaseAwarenessMessage(phase, toolName string, cfg *config.Config) string {
+	switch phase {
+	case "NEW_SESSION":
+		if cfg.ShouldWarnOnResearchIncomplete() {
+			return "[FIC] Note: Starting modifications without prior research. For complex tasks, consider research first."
 		}
-		return protocol.WriteEmpty()
-
-	default:
-		return protocol.WriteEmpty()
+	case "RESEARCH":
+		if cfg.ShouldWarnOnResearchIncomplete() {
+			return "[FIC] Note: Modifying files while in research phase. Ensure research is complete (70%+ confidence) for best results."
+		}
+	case "PLANNING_READY":
+		if cfg.ShouldWarnOnPlanIncomplete() {
+			return "[FIC] Note: Research complete but no validated plan. Consider creating a plan before implementation."
+		}
+	case "PLANNING":
+		if cfg.ShouldWarnOnPlanIncomplete() {
+			return "[FIC] Note: Plan exists but may not be validated. Consider validation with @fic-plan-validator."
+		}
 	}
+
+	// No message for IMPLEMENTATION_READY or IMPLEMENTATION - those are the expected phases
+	return ""
 }

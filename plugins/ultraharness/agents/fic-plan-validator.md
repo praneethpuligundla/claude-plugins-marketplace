@@ -63,6 +63,8 @@ For plans with 3+ implementation steps, analyze parallel execution opportunities
 
 ## Output Format
 
+This output becomes a PRESERVED ARTIFACT. Structure it carefully.
+
 ```
 ## PLAN VALIDATION REPORT
 
@@ -91,6 +93,22 @@ For plans with 3+ implementation steps, analyze parallel execution opportunities
 ...
 
 ### Overall Score: [X/10]
+
+### Files to Modify
+[List each file that will be changed - this is critical for artifact preservation]
+- `path/to/file.ts` (modify) - [What changes and why]
+- `path/to/new.ts` (create) - [Purpose of new file]
+- `path/to/old.ts` (delete) - [Why removing]
+...
+
+### Verification Steps
+[How to verify the implementation succeeded]
+1. Phase: [RESEARCH/PLANNING/IMPLEMENTATION] - Method: [test/manual/build] - [What to check]
+2. ...
+
+### Rollback Strategy
+[How to undo changes if something goes wrong]
+...
 
 ### Issues Found
 1. [CRITICAL] [Issue description]

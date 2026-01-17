@@ -130,7 +130,9 @@ func TestCheckGate(t *testing.T) {
 		}
 	})
 
-	t.Run("strict mode blocks when research not complete", func(t *testing.T) {
+	t.Run("strict mode warns (not blocks) when research not complete", func(t *testing.T) {
+		// Philosophy change: strict mode is now advisory-only
+		// Gates never block individual tools - that's the wrong model
 		tmpDir, err := os.MkdirTemp("", "gates-test")
 		if err != nil {
 			t.Fatalf("Failed to create temp dir: %v", err)
@@ -138,8 +140,8 @@ func TestCheckGate(t *testing.T) {
 		defer os.RemoveAll(tmpDir)
 
 		result := CheckGate(GateAllowEdit, tmpDir, "strict")
-		if result.Action != ActionBlock {
-			t.Errorf("Action = %v, want %v", result.Action, ActionBlock)
+		if result.Action != ActionWarn {
+			t.Errorf("Action = %v, want %v (advisory only)", result.Action, ActionWarn)
 		}
 	})
 
@@ -170,8 +172,9 @@ func TestCheckGate(t *testing.T) {
 		if result.Action != ActionWarn {
 			t.Errorf("Action = %v, want %v", result.Action, ActionWarn)
 		}
-		if result.Reason != "Planning phase not complete" {
-			t.Errorf("Reason = %v, want 'Planning phase not complete'", result.Reason)
+		// New advisory message format
+		if result.Reason != "Plan not validated" {
+			t.Errorf("Reason = %v, want 'Plan not validated'", result.Reason)
 		}
 	})
 

@@ -1,5 +1,8 @@
 // Package main contains integration tests for the FIC workflow system.
 // These tests verify the complete workflow: research → planning → implementation
+//
+// Philosophy: Gates are ADVISORY only - they never block individual tools.
+// The correct model is pause-and-prompt checkpoints at phase boundaries.
 package main
 
 import (
@@ -28,23 +31,23 @@ func TestFICWorkflowCycle(t *testing.T) {
 		t.Fatalf("Failed to create .claude dir: %v", err)
 	}
 
-	t.Run("Phase 1: Research - edits should be blocked/warned", func(t *testing.T) {
+	t.Run("Phase 1: Research - edits get advisory warning", func(t *testing.T) {
 		// Default state is research phase
 		result := gates.CheckGate(gates.GateAllowEdit, workDir, "standard")
 		if result.Action != gates.ActionWarn {
-			t.Errorf("Research phase: Action = %v, want %v", result.Action, gates.ActionWarn)
+			t.Errorf("Research phase: Action = %v, want %v (advisory)", result.Action, gates.ActionWarn)
 		}
 		if result.Reason != "Research phase not complete" {
 			t.Errorf("Research phase: wrong reason: %s", result.Reason)
 		}
 
-		// Strict mode should block
+		// Strict mode is now ALSO advisory (philosophy change)
 		result = gates.CheckGate(gates.GateAllowEdit, workDir, "strict")
-		if result.Action != gates.ActionBlock {
-			t.Errorf("Research phase strict: Action = %v, want %v", result.Action, gates.ActionBlock)
+		if result.Action != gates.ActionWarn {
+			t.Errorf("Research phase strict: Action = %v, want %v (advisory only)", result.Action, gates.ActionWarn)
 		}
 
-		// Relaxed mode should allow
+		// Relaxed mode should allow silently
 		result = gates.CheckGate(gates.GateAllowEdit, workDir, "relaxed")
 		if result.Action != gates.ActionAllow {
 			t.Errorf("Research phase relaxed: Action = %v, want %v", result.Action, gates.ActionAllow)
@@ -61,12 +64,12 @@ func TestFICWorkflowCycle(t *testing.T) {
 		}
 		saveFICState(t, workDir, state)
 
-		// Edit should still warn (plan not validated)
+		// Edit should warn (plan not validated) - advisory only
 		result := gates.CheckGate(gates.GateAllowEdit, workDir, "standard")
 		if result.Action != gates.ActionWarn {
-			t.Errorf("Planning phase: Action = %v, want %v", result.Action, gates.ActionWarn)
+			t.Errorf("Planning phase: Action = %v, want %v (advisory)", result.Action, gates.ActionWarn)
 		}
-		if result.Reason != "Planning phase not complete" {
+		if result.Reason != "Plan not validated" {
 			t.Errorf("Planning phase: wrong reason: %s", result.Reason)
 		}
 	})
@@ -101,7 +104,7 @@ func TestFICWorkflowCycle(t *testing.T) {
 	})
 }
 
-// TestContextTrackingAcrossWorkflow tests context utilization tracking during workflow
+// TestContextTrackingAcrossWorkflow tests context tracking during workflow
 func TestContextTrackingAcrossWorkflow(t *testing.T) {
 	workDir, err := os.MkdirTemp("", "context-integration")
 	if err != nil {
@@ -125,24 +128,21 @@ func TestContextTrackingAcrossWorkflow(t *testing.T) {
 		if ctx.SessionID != sessionID {
 			t.Errorf("SessionID = %v, want %v", ctx.SessionID, sessionID)
 		}
-		if ctx.EntryCount != 0 {
-			t.Errorf("EntryCount = %v, want 0", ctx.EntryCount)
-		}
-		if ctx.TotalTokenEstimate != 0 {
-			t.Errorf("TotalTokenEstimate = %v, want 0", ctx.TotalTokenEstimate)
+		if ctx.TotalToolCalls != 0 {
+			t.Errorf("TotalToolCalls = %v, want 0", ctx.TotalToolCalls)
 		}
 	})
 
-	t.Run("Context accumulates during research", func(t *testing.T) {
+	t.Run("Context tracks tool calls during research", func(t *testing.T) {
 		ctx, _ := context.LoadContextState(sessionID, workDir)
 
-		// Simulate tool use results
-		ctx.AddEntry("Read", string(make([]byte, 4000))) // ~1000 tokens
-		ctx.AddEntry("Grep", string(make([]byte, 2000))) // ~500 tokens
-		ctx.AddEntry("Glob", string(make([]byte, 800)))  // ~200 tokens
+		// Simulate tool use (simple counting, no token estimation)
+		ctx.AddEntry("Read", "file content")
+		ctx.AddEntry("Grep", "search results")
+		ctx.AddEntry("Glob", "file list")
 
-		if ctx.EntryCount != 3 {
-			t.Errorf("EntryCount = %v, want 3", ctx.EntryCount)
+		if ctx.TotalToolCalls != 3 {
+			t.Errorf("TotalToolCalls = %v, want 3", ctx.TotalToolCalls)
 		}
 
 		// Save and reload to verify persistence
@@ -155,8 +155,8 @@ func TestContextTrackingAcrossWorkflow(t *testing.T) {
 			t.Fatalf("Reload error: %v", err)
 		}
 
-		if reloaded.EntryCount != 3 {
-			t.Errorf("Reloaded EntryCount = %v, want 3", reloaded.EntryCount)
+		if reloaded.TotalToolCalls != 3 {
+			t.Errorf("Reloaded TotalToolCalls = %v, want 3", reloaded.TotalToolCalls)
 		}
 	})
 
@@ -172,26 +172,26 @@ func TestContextTrackingAcrossWorkflow(t *testing.T) {
 			t.Errorf("New session ID = %v, want %v", ctx.SessionID, newSessionID)
 		}
 		// State should persist across sessions (not reset)
-		if ctx.EntryCount != 3 {
-			t.Errorf("EntryCount = %v, want 3 (persisted)", ctx.EntryCount)
+		if ctx.TotalToolCalls != 3 {
+			t.Errorf("TotalToolCalls = %v, want 3 (persisted)", ctx.TotalToolCalls)
 		}
 		if ctx.LastSessionID != sessionID {
 			t.Errorf("LastSessionID = %v, want %v", ctx.LastSessionID, sessionID)
 		}
 	})
 
-	t.Run("Compaction threshold detection", func(t *testing.T) {
+	t.Run("NeedsCompaction by tool count", func(t *testing.T) {
 		ctx := &context.ContextState{
-			SessionID:          sessionID,
-			TotalTokenEstimate: 160000, // 80% of 200k
-			UtilizationPercent: 0.8,
+			SessionID:      sessionID,
+			TotalToolCalls: 100,
 		}
 
-		if !ctx.NeedsCompaction(0.75) {
-			t.Error("Should need compaction at 80% when threshold is 75%")
+		// Philosophy: use tool count, not token estimation
+		if !ctx.NeedsCompactionByToolCount(50) {
+			t.Error("Should need compaction at 100 tools when threshold is 50")
 		}
-		if ctx.NeedsCompaction(0.85) {
-			t.Error("Should not need compaction at 80% when threshold is 85%")
+		if ctx.NeedsCompactionByToolCount(150) {
+			t.Error("Should not need compaction at 100 tools when threshold is 150")
 		}
 	})
 }
@@ -244,6 +244,7 @@ func TestProgressLogIntegration(t *testing.T) {
 }
 
 // TestStrictnessLevelsAcrossPhases tests all strictness levels at each phase
+// Philosophy: strict mode is now advisory-only, same as standard
 func TestStrictnessLevelsAcrossPhases(t *testing.T) {
 	workDir, err := os.MkdirTemp("", "strictness-integration")
 	if err != nil {
@@ -255,11 +256,11 @@ func TestStrictnessLevelsAcrossPhases(t *testing.T) {
 	os.MkdirAll(claudeDir, 0755)
 
 	phases := []struct {
-		name             string
-		state            *gates.FICState
-		relaxedAction    gates.GateAction
-		standardAction   gates.GateAction
-		strictAction     gates.GateAction
+		name           string
+		state          *gates.FICState
+		relaxedAction  gates.GateAction
+		standardAction gates.GateAction
+		strictAction   gates.GateAction // Now same as standard (advisory)
 	}{
 		{
 			name: "research",
@@ -270,7 +271,7 @@ func TestStrictnessLevelsAcrossPhases(t *testing.T) {
 			},
 			relaxedAction:  gates.ActionAllow,
 			standardAction: gates.ActionWarn,
-			strictAction:   gates.ActionBlock,
+			strictAction:   gates.ActionWarn, // Changed: advisory only
 		},
 		{
 			name: "planning",
@@ -281,7 +282,7 @@ func TestStrictnessLevelsAcrossPhases(t *testing.T) {
 			},
 			relaxedAction:  gates.ActionAllow,
 			standardAction: gates.ActionWarn,
-			strictAction:   gates.ActionBlock,
+			strictAction:   gates.ActionWarn, // Changed: advisory only
 		},
 		{
 			name: "implementation",
@@ -312,7 +313,7 @@ func TestStrictnessLevelsAcrossPhases(t *testing.T) {
 				t.Errorf("%s standard: got %v, want %v", phase.name, result.Action, phase.standardAction)
 			}
 
-			// Test strict
+			// Test strict (now advisory only)
 			result = gates.CheckGate(gates.GateAllowEdit, workDir, "strict")
 			if result.Action != phase.strictAction {
 				t.Errorf("%s strict: got %v, want %v", phase.name, result.Action, phase.strictAction)
@@ -369,8 +370,8 @@ func TestSessionPersistence(t *testing.T) {
 
 		// Second access (same session)
 		ctx2, _ := context.LoadContextState(sessionID, workDir)
-		if ctx2.EntryCount != 1 {
-			t.Errorf("EntryCount = %v, want 1", ctx2.EntryCount)
+		if ctx2.TotalToolCalls != 1 {
+			t.Errorf("TotalToolCalls = %v, want 1", ctx2.TotalToolCalls)
 		}
 	})
 }

@@ -1,5 +1,8 @@
-// Package gates implements FIC (Feature-Implementation-Completion) verification gates.
-// Gates enforce the research → planning → implementation workflow.
+// Package gates implements FIC (Feature-Implementation-Completion) phase awareness.
+//
+// Philosophy: Gates are ADVISORY, not blocking. The correct model is to pause at
+// phase boundaries (via checkpoints), not to block individual tool calls.
+// This package provides phase awareness messages but NEVER blocks operations.
 package gates
 
 import (
@@ -69,9 +72,11 @@ func LoadFICState(workDir string) (*FICState, error) {
 	return &state, nil
 }
 
-// CheckGate checks if an operation is allowed based on FIC state
+// CheckGate checks phase status and returns advisory messages.
+// NOTE: This function NEVER blocks operations - it only provides awareness.
+// The blocking model has been replaced with pause-and-prompt checkpoints.
 func CheckGate(gate string, workDir string, strictness string) *GateResult {
-	// Relaxed mode: always allow
+	// Relaxed mode: no messages
 	if strictness == "relaxed" {
 		return &GateResult{Action: ActionAllow}
 	}
@@ -79,66 +84,59 @@ func CheckGate(gate string, workDir string, strictness string) *GateResult {
 	// Load FIC state
 	state, err := LoadFICState(workDir)
 	if err != nil {
-		// On error, allow but warn
-		return &GateResult{
-			Action: ActionAllow,
-			Reason: fmt.Sprintf("Could not load FIC state: %v", err),
-		}
+		// On error, allow silently
+		return &GateResult{Action: ActionAllow}
 	}
 
-	// Check gate based on phase
+	// Check gate based on phase (advisory only, never block)
 	switch gate {
 	case GateAllowEdit, GateAllowWrite:
-		return checkEditWriteGate(state, strictness)
+		return checkEditWriteGateAdvisory(state)
 	case GateAllowBash:
-		return checkBashGate(state, strictness)
+		return &GateResult{Action: ActionAllow} // Bash always allowed
 	default:
 		return &GateResult{Action: ActionAllow}
 	}
 }
 
-func checkEditWriteGate(state *FICState, strictness string) *GateResult {
-	// If research is not complete, block/warn
+// checkEditWriteGateAdvisory returns advisory messages based on phase (never blocks)
+func checkEditWriteGateAdvisory(state *FICState) *GateResult {
+	// If research is not complete, provide advisory
 	if !state.ResearchComplete {
-		result := &GateResult{
+		return &GateResult{
+			Action: ActionWarn, // Advisory only, will still allow
 			Reason: "Research phase not complete",
 			Suggestions: []string{
-				"Complete research using Read, Grep, Glob, Task tools first",
-				"Use /fic-research-done when research is complete",
+				"For complex tasks, consider research first",
+				"Use @fic-researcher for structured exploration",
 			},
 		}
-		if strictness == "strict" {
-			result.Action = ActionBlock
-		} else {
-			result.Action = ActionWarn
-		}
-		return result
 	}
 
-	// If plan is not validated, block/warn
+	// If plan is not validated, provide advisory
 	if !state.PlanValidated {
-		result := &GateResult{
-			Reason: "Planning phase not complete",
+		return &GateResult{
+			Action: ActionWarn, // Advisory only, will still allow
+			Reason: "Plan not validated",
 			Suggestions: []string{
-				"Create and validate your implementation plan",
-				"Use /fic-plan-done when plan is validated",
+				"Consider creating a plan for multi-step changes",
+				"Use @fic-plan-validator for plan review",
 			},
 		}
-		if strictness == "strict" {
-			result.Action = ActionBlock
-		} else {
-			result.Action = ActionWarn
-		}
-		return result
 	}
 
-	// All gates passed
+	// Phase is appropriate for implementation
 	return &GateResult{Action: ActionAllow}
 }
 
+// Legacy function kept for backward compatibility
+func checkEditWriteGate(state *FICState, strictness string) *GateResult {
+	// Always use advisory mode now - blocking is deprecated
+	return checkEditWriteGateAdvisory(state)
+}
+
 func checkBashGate(state *FICState, strictness string) *GateResult {
-	// Bash is allowed in all phases for read-only operations
-	// Only block destructive commands in early phases (not implemented here)
+	// Bash is always allowed
 	return &GateResult{Action: ActionAllow}
 }
 
@@ -176,13 +174,13 @@ func DefaultGateConfig() *GateConfig {
 	}
 }
 
-// CheckGateWithConfig checks if an operation is allowed using custom gate config
+// CheckGateWithConfig checks phase status with custom config (advisory only, never blocks)
 func CheckGateWithConfig(gate string, workDir string, strictness string, gateConfig *GateConfig) *GateResult {
 	if gateConfig == nil {
 		gateConfig = DefaultGateConfig()
 	}
 
-	// Relaxed mode: always allow
+	// Relaxed mode: no messages
 	if strictness == "relaxed" {
 		return &GateResult{Action: ActionAllow}
 	}
@@ -190,69 +188,52 @@ func CheckGateWithConfig(gate string, workDir string, strictness string, gateCon
 	// Load FIC state
 	state, err := LoadFICState(workDir)
 	if err != nil {
-		// On error, allow but warn
-		return &GateResult{
-			Action: ActionAllow,
-			Reason: fmt.Sprintf("Could not load FIC state: %v", err),
-		}
+		return &GateResult{Action: ActionAllow}
 	}
 
-	// Check gate based on phase
+	// Check gate based on phase (advisory only)
 	switch gate {
 	case GateAllowEdit, GateAllowWrite:
-		return checkEditWriteGateWithConfig(state, strictness, gateConfig)
+		return checkEditWriteGateWithConfigAdvisory(state, gateConfig)
 	case GateAllowBash:
-		return checkBashGate(state, strictness)
+		return &GateResult{Action: ActionAllow}
 	default:
 		return &GateResult{Action: ActionAllow}
 	}
 }
 
-func checkEditWriteGateWithConfig(state *FICState, strictness string, gateConfig *GateConfig) *GateResult {
-	// If research is not complete, block/warn based on config
-	if !state.ResearchComplete {
-		if !gateConfig.WarnOnResearchIncomplete && strictness != "strict" {
-			return &GateResult{Action: ActionAllow}
-		}
-
-		result := &GateResult{
+// checkEditWriteGateWithConfigAdvisory returns advisory messages based on config (never blocks)
+func checkEditWriteGateWithConfigAdvisory(state *FICState, gateConfig *GateConfig) *GateResult {
+	// If research is not complete and warnings are enabled
+	if !state.ResearchComplete && gateConfig.WarnOnResearchIncomplete {
+		return &GateResult{
+			Action: ActionWarn, // Advisory only
 			Reason: "Research phase not complete",
 			Suggestions: []string{
-				"Complete research using Read, Grep, Glob, Task tools first",
-				"Use /fic-research-done when research is complete",
+				"For complex tasks, consider research first",
+				"Use @fic-researcher for structured exploration",
 			},
 		}
-		if strictness == "strict" && gateConfig.BlockInStrictMode {
-			result.Action = ActionBlock
-		} else {
-			result.Action = ActionWarn
-		}
-		return result
 	}
 
-	// If plan is not validated, block/warn based on config
-	if !state.PlanValidated {
-		if !gateConfig.WarnOnPlanIncomplete && strictness != "strict" {
-			return &GateResult{Action: ActionAllow}
-		}
-
-		result := &GateResult{
-			Reason: "Planning phase not complete",
+	// If plan is not validated and warnings are enabled
+	if !state.PlanValidated && gateConfig.WarnOnPlanIncomplete {
+		return &GateResult{
+			Action: ActionWarn, // Advisory only
+			Reason: "Plan not validated",
 			Suggestions: []string{
-				"Create and validate your implementation plan",
-				"Use /fic-plan-done when plan is validated",
+				"Consider creating a plan for multi-step changes",
+				"Use @fic-plan-validator for plan review",
 			},
 		}
-		if strictness == "strict" && gateConfig.BlockInStrictMode {
-			result.Action = ActionBlock
-		} else {
-			result.Action = ActionWarn
-		}
-		return result
 	}
 
-	// All gates passed
 	return &GateResult{Action: ActionAllow}
+}
+
+// Legacy function kept for backward compatibility (redirects to advisory version)
+func checkEditWriteGateWithConfig(state *FICState, strictness string, gateConfig *GateConfig) *GateResult {
+	return checkEditWriteGateWithConfigAdvisory(state, gateConfig)
 }
 
 // SaveFICState saves the FIC state to disk

@@ -29,6 +29,7 @@ const FilePermission = 0600
 const DirPermission = 0700
 
 // Research represents a research artifact.
+// Enhanced to capture structured information for better compaction artifacts.
 type Research struct {
 	ID               string         `json:"id"`
 	FeatureOrTask    string         `json:"feature_or_task"`
@@ -37,12 +38,20 @@ type Research struct {
 	OpenQuestions    []OpenQuestion `json:"open_questions,omitempty"`
 	ResearchSessions int            `json:"research_sessions"`
 	UpdatedAt        string         `json:"updated_at"`
+
+	// Enhanced fields for better artifact quality
+	CodebaseStructure   string        `json:"codebase_structure,omitempty"`   // High-level architecture understanding
+	RelevantFiles       []FileContext `json:"relevant_files,omitempty"`       // Files with WHY they matter
+	PotentialApproaches []Approach    `json:"potential_approaches,omitempty"` // Solution options considered
+	Assumptions         []string      `json:"assumptions,omitempty"`          // Explicit assumptions made
 }
 
 // Discovery represents a research discovery.
 type Discovery struct {
-	Summary  string `json:"summary"`
-	Critical bool   `json:"critical,omitempty"`
+	Summary    string  `json:"summary"`
+	Critical   bool    `json:"critical,omitempty"`
+	Confidence float64 `json:"confidence,omitempty"` // Per-discovery confidence
+	Source     string  `json:"source,omitempty"`     // file:line reference
 }
 
 // OpenQuestion represents an open research question.
@@ -51,32 +60,86 @@ type OpenQuestion struct {
 	Blocking bool   `json:"blocking,omitempty"`
 }
 
+// FileContext captures why a file is relevant to the task.
+type FileContext struct {
+	Path     string   `json:"path"`
+	Purpose  string   `json:"purpose"`    // Why this file matters for the task
+	KeyAreas []string `json:"key_areas"`  // Specific functions/sections relevant
+}
+
+// Approach represents a potential solution approach.
+type Approach struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Pros        []string `json:"pros,omitempty"`
+	Cons        []string `json:"cons,omitempty"`
+	Recommended bool     `json:"recommended,omitempty"`
+}
+
 // IsComplete returns true if research confidence is >= 70%.
 func (r *Research) IsComplete() bool {
 	return r.ConfidenceScore >= 0.7
 }
 
 // Plan represents a plan artifact.
+// Enhanced to capture files to modify, verification steps, and rollback strategy.
 type Plan struct {
-	ID               string           `json:"id"`
-	Goal             string           `json:"goal"`
-	Steps            []PlanStep       `json:"steps,omitempty"`
-	ValidationResult *ValidationResult `json:"validation_result,omitempty"`
-	ResearchArtifactID string         `json:"research_artifact_id,omitempty"`
-	UpdatedAt        string           `json:"updated_at"`
+	ID                 string             `json:"id"`
+	Goal               string             `json:"goal"`
+	Steps              []PlanStep         `json:"steps,omitempty"`
+	ValidationResult   *ValidationResult  `json:"validation_result,omitempty"`
+	ResearchArtifactID string             `json:"research_artifact_id,omitempty"`
+	UpdatedAt          string             `json:"updated_at"`
+
+	// Enhanced fields for better artifact quality
+	FilesToModify     []FileModification `json:"files_to_modify,omitempty"`     // Exact files with change description
+	VerificationSteps []Verification     `json:"verification_steps,omitempty"` // How to verify each phase
+	Rollback          string             `json:"rollback,omitempty"`           // How to undo if needed
+	ParallelBatches   []ParallelBatch    `json:"parallel_batches,omitempty"`   // For parallel execution
 }
 
 // PlanStep represents a step in a plan.
 type PlanStep struct {
-	ID          string `json:"id"`
-	Description string `json:"description"`
-	Completed   bool   `json:"completed,omitempty"`
+	ID           string   `json:"id"`
+	Description  string   `json:"description"`
+	Completed    bool     `json:"completed,omitempty"`
+	Files        []string `json:"files,omitempty"`        // Files this step touches
+	Dependencies []string `json:"dependencies,omitempty"` // Step IDs this depends on
 }
 
 // ValidationResult represents plan validation outcome.
 type ValidationResult struct {
 	Recommendation string `json:"recommendation"` // PROCEED, REVISE, BLOCK
 	Score          int    `json:"score,omitempty"`
+	Feedback       string `json:"feedback,omitempty"` // Validator feedback
+}
+
+// FileModification describes a planned file change.
+type FileModification struct {
+	Path        string `json:"path"`
+	ChangeType  string `json:"change_type"`  // "modify", "create", "delete"
+	Description string `json:"description"` // What changes and why
+}
+
+// Verification describes how to verify a phase or step.
+type Verification struct {
+	Phase       string `json:"phase"`       // Which phase this verifies
+	Method      string `json:"method"`      // "test", "manual", "build"
+	Description string `json:"description"` // What to check
+}
+
+// ParallelBatch represents a group of tasks that can run in parallel.
+type ParallelBatch struct {
+	BatchNum int            `json:"batch_num"`
+	Tasks    []ParallelTask `json:"tasks"`
+}
+
+// ParallelTask represents a task within a parallel batch.
+type ParallelTask struct {
+	StepID       string `json:"step_id"`
+	Description  string `json:"description"`
+	Scope        string `json:"scope"`        // File patterns this task affects
+	Dependencies string `json:"dependencies"` // Dependencies from prior batches
 }
 
 // IsActionable returns true if plan is validated for implementation.
@@ -92,6 +155,23 @@ type Implementation struct {
 	StepsInProgress []string `json:"steps_in_progress,omitempty"`
 	PlanDeviations  []string `json:"plan_deviations,omitempty"`
 	UpdatedAt       string   `json:"updated_at"`
+}
+
+// PhaseCheckpoint tracks human review at phase transitions.
+// This enforces the pause-and-prompt model where human review is required
+// at Research→Planning and Planning→Implementation transitions.
+type PhaseCheckpoint struct {
+	Phase          string `json:"phase"`           // "RESEARCH", "PLANNING"
+	CompletedAt    string `json:"completed_at"`    // ISO timestamp
+	HumanReviewed  bool   `json:"human_reviewed"`  // Set to true after user acknowledges
+	ReviewResponse string `json:"review_response"` // User's feedback if any
+	Summary        string `json:"summary"`         // Brief summary shown to user
+}
+
+// CheckpointState tracks pending checkpoints requiring human review.
+type CheckpointState struct {
+	PendingCheckpoint *PhaseCheckpoint `json:"pending_checkpoint,omitempty"`
+	CompletedCheckpoints []PhaseCheckpoint `json:"completed_checkpoints,omitempty"`
 }
 
 // GetArtifactDir returns the directory for a given artifact type.
@@ -252,4 +332,94 @@ func GetPhaseInfo(workDir string) map[string]interface{} {
 	}
 
 	return info
+}
+
+// CheckpointStateFile is the name of the checkpoint state file.
+const CheckpointStateFile = "fic-checkpoint-state.json"
+
+// LoadCheckpointState loads the checkpoint state from disk.
+func LoadCheckpointState(workDir string) (*CheckpointState, error) {
+	statePath := filepath.Join(workDir, ".claude", CheckpointStateFile)
+
+	data, err := os.ReadFile(statePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &CheckpointState{}, nil
+		}
+		return nil, err
+	}
+
+	var state CheckpointState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return nil, err
+	}
+
+	return &state, nil
+}
+
+// SaveCheckpointState saves the checkpoint state to disk.
+func SaveCheckpointState(workDir string, state *CheckpointState) error {
+	stateDir := filepath.Join(workDir, ".claude")
+	if err := os.MkdirAll(stateDir, DirPermission); err != nil {
+		return err
+	}
+
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	statePath := filepath.Join(stateDir, CheckpointStateFile)
+	return os.WriteFile(statePath, data, FilePermission)
+}
+
+// SetPendingCheckpoint sets a pending checkpoint requiring human review.
+func SetPendingCheckpoint(workDir string, phase string, summary string) error {
+	state, err := LoadCheckpointState(workDir)
+	if err != nil {
+		state = &CheckpointState{}
+	}
+
+	state.PendingCheckpoint = &PhaseCheckpoint{
+		Phase:         phase,
+		CompletedAt:   time.Now().Format(time.RFC3339),
+		HumanReviewed: false,
+		Summary:       summary,
+	}
+
+	return SaveCheckpointState(workDir, state)
+}
+
+// ClearPendingCheckpoint clears the pending checkpoint after human review.
+func ClearPendingCheckpoint(workDir string, reviewResponse string) error {
+	state, err := LoadCheckpointState(workDir)
+	if err != nil || state.PendingCheckpoint == nil {
+		return nil
+	}
+
+	// Mark as reviewed and move to completed
+	state.PendingCheckpoint.HumanReviewed = true
+	state.PendingCheckpoint.ReviewResponse = reviewResponse
+	state.CompletedCheckpoints = append(state.CompletedCheckpoints, *state.PendingCheckpoint)
+	state.PendingCheckpoint = nil
+
+	return SaveCheckpointState(workDir, state)
+}
+
+// HasPendingCheckpoint returns true if there's a checkpoint awaiting review.
+func HasPendingCheckpoint(workDir string) bool {
+	state, err := LoadCheckpointState(workDir)
+	if err != nil {
+		return false
+	}
+	return state.PendingCheckpoint != nil && !state.PendingCheckpoint.HumanReviewed
+}
+
+// GetPendingCheckpoint returns the pending checkpoint if any.
+func GetPendingCheckpoint(workDir string) *PhaseCheckpoint {
+	state, err := LoadCheckpointState(workDir)
+	if err != nil {
+		return nil
+	}
+	return state.PendingCheckpoint
 }

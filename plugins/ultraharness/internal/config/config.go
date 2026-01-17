@@ -39,14 +39,16 @@ type Config struct {
 
 // FICConfig contains FIC-specific configuration
 type FICConfig struct {
-	// Context utilization thresholds
-	AutoCompactThreshold    float64 `json:"auto_compact_threshold"`
-	CompactionToolThreshold int     `json:"compaction_tool_threshold"`
-	TargetUtilizationHigh   float64 `json:"target_utilization_high"`
-	TargetUtilizationLow    float64 `json:"target_utilization_low"`
+	// Context utilization thresholds (target 40-60%)
+	// Philosophy: Compaction is a PROACTIVE quality tool, not an emergency measure
+	TargetUtilizationLow  float64 `json:"target_utilization_low"`  // Ideal lower bound (40%)
+	TargetUtilizationHigh float64 `json:"target_utilization_high"` // Ideal upper bound (60%)
+	SuggestCompactAt      float64 `json:"suggest_compact_at"`      // Soft suggestion point (55%)
 
-	// Auto-compaction behavior
-	AutoCompactEnabled bool `json:"auto_compact_enabled"`
+	// Legacy fields (kept for backward compatibility, no longer drive emergency behavior)
+	AutoCompactThreshold    float64 `json:"auto_compact_threshold,omitempty"`
+	CompactionToolThreshold int     `json:"compaction_tool_threshold,omitempty"`
+	AutoCompactEnabled      bool    `json:"auto_compact_enabled,omitempty"`
 
 	// Research phase thresholds
 	ResearchConfidenceThreshold float64 `json:"research_confidence_threshold"`
@@ -57,6 +59,9 @@ type FICConfig struct {
 	WarnOnPlanIncomplete     bool `json:"warn_on_plan_incomplete"`
 	BlockInStrictMode        bool `json:"block_in_strict_mode"`
 
+	// Phase checkpoint behavior
+	RequireCheckpointReview bool `json:"require_checkpoint_review"` // Pause at phase transitions
+
 	// Parallel implementation settings
 	ParallelImplementationEnabled bool `json:"parallel_implementation_enabled"`
 	MaxParallelAgents             int  `json:"max_parallel_agents"`
@@ -66,27 +71,35 @@ type FICConfig struct {
 // DefaultConfig returns the default configuration
 func DefaultConfig() *Config {
 	return &Config{
-		Strictness:               StrictnessStandard,
-		FICEnabled:               true,
-		FICContextTracking:       true,
-		FICAutoDelegateResearch:  true,
-		AutoProgressLogging:      true,
+		Strictness:                StrictnessStandard,
+		FICEnabled:                true,
+		FICContextTracking:        true,
+		FICAutoDelegateResearch:   true,
+		AutoProgressLogging:       true,
 		AutoCheckpointSuggestions: true,
 		CheckpointIntervalMinutes: 30,
-		FeatureEnforcement:       true,
-		InitScriptExecution:      true,
-		BaselineTestsOnStartup:   true,
+		FeatureEnforcement:        true,
+		InitScriptExecution:       true,
+		BaselineTestsOnStartup:    true,
 		FICConfig: &FICConfig{
-			AutoCompactThreshold:        0.85,
-			CompactionToolThreshold:     50,
-			TargetUtilizationHigh:       0.60,
-			TargetUtilizationLow:        0.40,
-			AutoCompactEnabled:          true,
+			// Target utilization range: 40-60% (per ACE-FCA best practices)
+			TargetUtilizationLow:  0.40,
+			TargetUtilizationHigh: 0.60,
+			SuggestCompactAt:      0.55, // Soft suggestion, not demand
+
+			// Research phase thresholds
 			ResearchConfidenceThreshold: 0.70,
 			MaxOpenQuestions:            2,
-			WarnOnResearchIncomplete:      true,
-			WarnOnPlanIncomplete:          true,
-			BlockInStrictMode:             true,
+
+			// Gate behavior: advisory warnings, not blocking
+			WarnOnResearchIncomplete: true,
+			WarnOnPlanIncomplete:     true,
+			BlockInStrictMode:        false, // Changed: don't block individual tools
+
+			// Phase checkpoints: pause for human review at transitions
+			RequireCheckpointReview: true,
+
+			// Parallel implementation
 			ParallelImplementationEnabled: true,
 			MaxParallelAgents:             3,
 			MinStepsForParallel:           3,
@@ -145,20 +158,49 @@ func (c *Config) IsStandardMode() bool {
 	return c.Strictness == StrictnessStandard || c.Strictness == ""
 }
 
-// GetAutoCompactThreshold returns the auto-compact threshold
+// GetSuggestCompactAt returns the threshold at which compaction is suggested (not demanded)
+func (c *Config) GetSuggestCompactAt() float64 {
+	if c.FICConfig != nil && c.FICConfig.SuggestCompactAt > 0 {
+		return c.FICConfig.SuggestCompactAt
+	}
+	return 0.55
+}
+
+// GetTargetUtilizationRange returns the target utilization range (low, high)
+func (c *Config) GetTargetUtilizationRange() (float64, float64) {
+	if c.FICConfig != nil {
+		low := c.FICConfig.TargetUtilizationLow
+		high := c.FICConfig.TargetUtilizationHigh
+		if low > 0 && high > 0 {
+			return low, high
+		}
+	}
+	return 0.40, 0.60
+}
+
+// RequireCheckpointReview returns whether phase transitions require human review
+func (c *Config) RequireCheckpointReview() bool {
+	if c.FICConfig != nil {
+		return c.FICConfig.RequireCheckpointReview
+	}
+	return true
+}
+
+// GetAutoCompactThreshold returns the auto-compact threshold (legacy, kept for compatibility)
 func (c *Config) GetAutoCompactThreshold() float64 {
 	if c.FICConfig != nil && c.FICConfig.AutoCompactThreshold > 0 {
 		return c.FICConfig.AutoCompactThreshold
 	}
-	return 0.85
+	// Return suggest threshold as fallback
+	return c.GetSuggestCompactAt()
 }
 
-// GetCompactionToolThreshold returns the compaction tool threshold
+// GetCompactionToolThreshold returns the compaction tool threshold (legacy, kept for compatibility)
 func (c *Config) GetCompactionToolThreshold() int {
 	if c.FICConfig != nil && c.FICConfig.CompactionToolThreshold > 0 {
 		return c.FICConfig.CompactionToolThreshold
 	}
-	return 50
+	return 100 // Increased default, less aggressive
 }
 
 // GetResearchConfidenceThreshold returns the research confidence threshold

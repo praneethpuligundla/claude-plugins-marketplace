@@ -1,8 +1,8 @@
-// Package context handles FIC context intelligence tracking.
-// Tracks context utilization and detects when compaction is needed.
+// Package context handles FIC context tracking.
 //
-// Context tracking uses weighted tool call counts as a proxy for actual
-// context utilization, since hooks cannot access the real context window.
+// Philosophy: Simple tool call counting, not complex token estimation.
+// The goal is to track session progress, not predict context overflow.
+// Compaction should be proactive (at phase completion), not reactive (at token limits).
 package context
 
 import (
@@ -22,29 +22,7 @@ const FilePermission = 0600
 // DirPermission is the permission for state directories
 const DirPermission = 0700
 
-// MaxContextTokens is the assumed maximum context size
-const MaxContextTokens = 200000
-
-// Tool token weights - estimated average tokens per tool use
-// These are conservative estimates including tool input, output, and response overhead
-var toolWeights = map[string]int{
-	"Read":  1500, // Large file reads
-	"Grep":  800,  // Search results
-	"Glob":  300,  // File listings
-	"Task":  2500, // Subagent responses are large
-	"Edit":  600,  // Edit context + result
-	"Write": 500,  // Write content + confirmation
-	"Bash":  700,  // Command + output
-}
-
-// BaseOverhead is tokens added per tool call for conversation structure
-const BaseOverhead = 400
-
-// ConversationMultiplier accounts for conversation history accumulation
-// As conversation grows, each new message includes more history context
-const ConversationMultiplier = 1.15
-
-// ToolCallsByType tracks tool usage by type
+// ToolCallsByType tracks tool usage by type (simple counting)
 type ToolCallsByType struct {
 	Read  int `json:"read"`
 	Grep  int `json:"grep"`
@@ -56,24 +34,22 @@ type ToolCallsByType struct {
 	Other int `json:"other"`
 }
 
-// ContextState tracks context utilization
+// ContextState tracks session progress (simplified - no token estimation)
 type ContextState struct {
-	// Session tracking - now persists across sessions
+	// Session tracking
 	SessionID       string    `json:"session_id"`
 	SessionStarted  time.Time `json:"session_started"`
 	LastSessionID   string    `json:"last_session_id,omitempty"`
 	CompactionCount int       `json:"compaction_count"`
 
-	// Tool tracking
+	// Simple tool tracking (counts only, no estimation)
 	ToolCalls      ToolCallsByType `json:"tool_calls"`
 	TotalToolCalls int             `json:"total_tool_calls"`
 
-	// Token estimation
-	TotalTokenEstimate int     `json:"total_token_estimate"`
-	UtilizationPercent float64 `json:"utilization_percent"`
-
-	// Legacy fields for compatibility
-	EntryCount           int       `json:"entry_count"`
+	// Legacy fields (kept for backward compatibility, no longer used)
+	TotalTokenEstimate   int       `json:"total_token_estimate,omitempty"`
+	UtilizationPercent   float64   `json:"utilization_percent,omitempty"`
+	EntryCount           int       `json:"entry_count,omitempty"`
 	RedundantDiscoveries []string  `json:"redundant_discoveries,omitempty"`
 	LastUpdated          time.Time `json:"last_updated"`
 }
@@ -129,12 +105,11 @@ func (s *ContextState) Save(workDir string) error {
 	return os.WriteFile(statePath, data, FilePermission)
 }
 
-// AddEntry updates context tracking for a tool use
+// AddEntry updates context tracking for a tool use (simple counting)
 func (s *ContextState) AddEntry(toolName string, toolResult string) string {
-	s.EntryCount++
 	s.TotalToolCalls++
 
-	// Track by tool type
+	// Track by tool type (simple counting)
 	switch toolName {
 	case "Read":
 		s.ToolCalls.Read++
@@ -154,71 +129,20 @@ func (s *ContextState) AddEntry(toolName string, toolResult string) string {
 		s.ToolCalls.Other++
 	}
 
-	// Calculate token estimate with weights
-	weight := toolWeights[toolName]
-	if weight == 0 {
-		weight = 500 // Default for unknown tools
-	}
-
-	// Add base overhead + weighted tool tokens
-	toolTokens := BaseOverhead + weight
-
-	// For tools with output, also consider actual result size
-	if len(toolResult) > 0 {
-		resultTokens := len(toolResult) / 4
-		// Use the larger of weight estimate or actual result
-		if resultTokens > weight {
-			toolTokens = BaseOverhead + resultTokens
-		}
-	}
-
-	// Apply conversation multiplier based on depth
-	// Context grows non-linearly as conversation accumulates
-	depthMultiplier := 1.0
-	if s.TotalToolCalls > 10 {
-		depthMultiplier = 1.0 + (float64(s.TotalToolCalls-10) * 0.01) // +1% per call after 10
-		if depthMultiplier > ConversationMultiplier {
-			depthMultiplier = ConversationMultiplier
-		}
-	}
-
-	s.TotalTokenEstimate += int(float64(toolTokens) * depthMultiplier)
-
-	// Update utilization
-	s.UtilizationPercent = float64(s.TotalTokenEstimate) / float64(MaxContextTokens)
-
 	return ""
 }
 
-// NeedsCompaction returns true if context utilization is above threshold
+// NeedsCompaction is kept for backward compatibility but is no longer recommended.
+// Philosophy: Compaction should be proactive (at phase completion), not reactive.
 func (s *ContextState) NeedsCompaction(threshold float64) bool {
-	return s.UtilizationPercent >= threshold
+	// Legacy: always returns false now since we don't track utilization
+	return false
 }
 
-// NeedsCompactionByToolCount returns true if tool count exceeds limit
-// This is a more reliable heuristic than token estimation
+// NeedsCompactionByToolCount is kept for backward compatibility.
+// Philosophy: Tool count alone is not a good indicator of when to compact.
 func (s *ContextState) NeedsCompactionByToolCount(maxTools int) bool {
 	return s.TotalToolCalls >= maxTools
-}
-
-// GetUtilizationMessage returns a human-readable utilization message
-func (s *ContextState) GetUtilizationMessage() string {
-	if s.UtilizationPercent < 0.3 {
-		return ""
-	}
-
-	level := "moderate"
-	if s.UtilizationPercent >= 0.7 {
-		level = "CRITICAL"
-	} else if s.UtilizationPercent >= 0.5 {
-		level = "high"
-	}
-
-	return fmt.Sprintf("[FIC] Context %s: %.0f%% (~%dk tokens, %d tool calls)",
-		level,
-		s.UtilizationPercent*100,
-		s.TotalTokenEstimate/1000,
-		s.TotalToolCalls)
 }
 
 // Reset clears the context state after compaction
@@ -228,19 +152,14 @@ func (s *ContextState) Reset(sessionID string) {
 	s.SessionStarted = time.Now()
 	s.ToolCalls = ToolCallsByType{}
 	s.TotalToolCalls = 0
-	s.TotalTokenEstimate = 0
-	s.UtilizationPercent = 0
-	s.EntryCount = 0
-	s.RedundantDiscoveries = nil
 	s.LastUpdated = time.Now()
 }
 
-// GetSummary returns a summary of context usage
+// GetSummary returns a summary of session progress
 func (s *ContextState) GetSummary() string {
-	return fmt.Sprintf("Tool calls: %d (Read:%d, Grep:%d, Glob:%d, Edit:%d, Write:%d, Bash:%d, Task:%d) | Est. tokens: %dk | Util: %.0f%%",
+	return fmt.Sprintf("Tool calls: %d (Read:%d, Grep:%d, Glob:%d, Edit:%d, Write:%d, Bash:%d, Task:%d) | Compactions: %d",
 		s.TotalToolCalls,
 		s.ToolCalls.Read, s.ToolCalls.Grep, s.ToolCalls.Glob,
 		s.ToolCalls.Edit, s.ToolCalls.Write, s.ToolCalls.Bash, s.ToolCalls.Task,
-		s.TotalTokenEstimate/1000,
-		s.UtilizationPercent*100)
+		s.CompactionCount)
 }

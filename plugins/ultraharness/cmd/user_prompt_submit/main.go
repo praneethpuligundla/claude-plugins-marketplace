@@ -1,7 +1,7 @@
-// UserPromptSubmit hook detects research/planning patterns and triggers auto-compaction.
+// UserPromptSubmit hook detects research/planning patterns and enforces phase checkpoints.
 //
 // This hook runs when the user submits a prompt to:
-// 1. Check context utilization and trigger compaction when >= 70%
+// 1. Check for pending phase checkpoints requiring human review
 // 2. Detect research-triggering prompts (exploration, investigation)
 // 3. Detect planning-triggering prompts
 // 4. Inject directives to delegate to appropriate subagents
@@ -15,7 +15,6 @@ import (
 
 	"ultraharness/internal/artifacts"
 	"ultraharness/internal/config"
-	"ultraharness/internal/context"
 	"ultraharness/internal/protocol"
 	"ultraharness/internal/validation"
 )
@@ -101,24 +100,23 @@ func run() error {
 		prompt = prompt[:maxPromptSize]
 	}
 
-	var messages []string
-
-	// Check context utilization for auto-compaction
-	sessionID := input.SessionID
-	if sessionID == "" {
-		sessionID = "default"
-	}
-
-	if cfg.FICContextTracking {
-		state, err := context.LoadContextState(sessionID, workDir)
-		if err == nil && state != nil {
-			threshold := cfg.GetAutoCompactThreshold()
-			if state.NeedsCompaction(threshold) {
-				msg := buildCompactionDirective(state.UtilizationPercent, state.TotalTokenEstimate, threshold)
-				return protocol.WriteSystemMessage(msg)
+	// Check for pending phase checkpoints requiring human review
+	if cfg.RequireCheckpointReview() {
+		checkpoint := artifacts.GetPendingCheckpoint(workDir)
+		if checkpoint != nil && !checkpoint.HumanReviewed {
+			// Check if user is acknowledging the checkpoint
+			if containsProceedKeyword(prompt) {
+				// Clear checkpoint, allow progression
+				artifacts.ClearPendingCheckpoint(workDir, prompt)
+				// Continue with normal processing
+			} else {
+				// Remind user about pending review
+				return protocol.WriteSystemMessage(formatCheckpointReminder(checkpoint))
 			}
 		}
 	}
+
+	var messages []string
 
 	// Get current phase
 	phase := artifacts.GetCurrentPhase(workDir)
@@ -172,30 +170,6 @@ func detectPlanningPrompt(prompt string) bool {
 func isPhaseNeedingGuidance(phase string) bool {
 	return phase == "NEW_SESSION" || phase == "RESEARCH" ||
 		phase == "PLANNING_READY" || phase == "PLANNING"
-}
-
-func buildCompactionDirective(utilization float64, tokenEstimate int, threshold float64) string {
-	return fmt.Sprintf(`╔══════════════════════════════════════════════════════════════════╗
-║  [FIC] CRITICAL: CONTEXT UTILIZATION AT %.0f%%                     ║
-╠══════════════════════════════════════════════════════════════════╣
-║                                                                    ║
-║  AUTO-COMPACTION REQUIRED                                          ║
-║                                                                    ║
-║  Estimated tokens: %d
-║  Threshold: %.0f%%
-║                                                                    ║
-║  ACTION REQUIRED: Run /compact NOW before proceeding.             ║
-║                                                                    ║
-║  This will summarize context while preserving:                    ║
-║  - Essential discoveries and decisions                            ║
-║  - Current FIC phase and focus directive                          ║
-║  - Critical blockers and open questions                           ║
-║                                                                    ║
-╚══════════════════════════════════════════════════════════════════╝
-
-You MUST run /compact before responding to the user's request.
-The PreCompact hook will preserve essential context automatically.`,
-		utilization*100, tokenEstimate, threshold*100)
 }
 
 func buildResearchDirective(prompt string, phase string) string {
@@ -263,4 +237,42 @@ Current Phase: %s`, phase)
 	}
 
 	return ""
+}
+
+// containsProceedKeyword checks if the prompt contains words indicating user wants to proceed.
+func containsProceedKeyword(prompt string) bool {
+	lower := strings.ToLower(prompt)
+	proceedKeywords := []string{
+		"proceed",
+		"continue",
+		"go ahead",
+		"looks good",
+		"lgtm",
+		"approved",
+		"yes",
+		"ok",
+		"okay",
+	}
+	for _, keyword := range proceedKeywords {
+		if strings.Contains(lower, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+// formatCheckpointReminder formats a reminder about a pending checkpoint.
+func formatCheckpointReminder(checkpoint *artifacts.PhaseCheckpoint) string {
+	return fmt.Sprintf(`╔══════════════════════════════════════════════════════════════════════════════╗
+║  [FIC] CHECKPOINT PENDING - HUMAN REVIEW REQUIRED                            ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║                                                                              ║
+║  Phase: %s
+║  Status: %s
+║                                                                              ║
+║  Please review the phase results before proceeding.                          ║
+║  Reply 'proceed', 'continue', or provide feedback to move forward.           ║
+║                                                                              ║
+╚══════════════════════════════════════════════════════════════════════════════╝`,
+		checkpoint.Phase, checkpoint.Summary)
 }
